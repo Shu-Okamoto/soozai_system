@@ -1,0 +1,1713 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>惣菜本部 業務システム</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=BIZ+UDGothic:wght@400;700&display=swap');
+  :root {
+    --bg:#F7F5F0; --surface:#fff; --surface2:#F0EDE7; --border:#DDD9D0;
+    --accent:#3B6E3F; --accent-light:#E8F4E9;
+    --warn:#C17B2A; --warn-light:#FFF3E0;
+    --danger:#C0392B; --danger-light:#FDECEA;
+    --text:#1A1A18; --text2:#5A5A55; --text3:#9A9A90;
+    --shadow:0 1px 3px rgba(0,0,0,.08),0 4px 16px rgba(0,0,0,.04);
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'BIZ UDGothic',sans-serif;background:var(--bg);color:var(--text);font-size:16px;min-height:100vh}
+  .app{display:flex;min-height:100vh}
+  .sidebar{width:230px;background:#1A1A18;color:#fff;display:flex;flex-direction:column;position:fixed;top:0;left:0;height:100vh;z-index:100;overflow-y:auto;transition:transform .25s ease}
+  .sidebar.closed{transform:translateX(-230px)}
+  .main{margin-left:230px;flex:1;display:flex;flex-direction:column;min-height:100vh;transition:margin-left .25s ease}
+  .main.sidebar-closed{margin-left:0}
+  .topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 20px;height:58px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;box-shadow:var(--shadow)}
+  .content{padding:20px;flex:1}
+
+  .sidebar-logo{padding:18px 14px 12px;border-bottom:1px solid rgba(255,255,255,.1)}
+  .sidebar-logo h1{font-size:13px;font-weight:700;line-height:1.5}
+  .sidebar-logo p{font-size:11px;color:rgba(255,255,255,.4);margin-top:2px}
+  .nav-group{padding:4px 0}
+  .nav-label{font-size:11px;color:rgba(255,255,255,.3);padding:10px 14px 4px;letter-spacing:.1em;font-weight:700}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;font-size:15px;color:rgba(255,255,255,.7);border:none;background:none;width:100%;text-align:left;transition:all .15s;min-height:48px}
+  .nav-item:hover{background:rgba(255,255,255,.08);color:#fff}
+  .nav-item.active{background:var(--accent);color:#fff;font-weight:700}
+  .sidebar-bottom{margin-top:auto;padding:10px 14px;border-top:1px solid rgba(255,255,255,.1);font-size:11px;color:rgba(255,255,255,.3)}
+
+  .page-title{font-size:17px;font-weight:700}
+  .topbar-right{display:flex;align-items:center;gap:10px}
+  .topbar-right label{font-size:14px;color:var(--text2)}
+
+  input[type="date"],input[type="text"],input[type="number"],select,textarea{
+    border:1px solid var(--border);border-radius:6px;padding:8px 11px;font-size:15px;
+    font-family:inherit;background:var(--surface);color:var(--text);outline:none;transition:border-color .15s;min-height:44px}
+  input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-light)}
+  input[type="number"]{text-align:right}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);margin-bottom:16px}
+  .card-header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+  .card-title{font-size:16px;font-weight:700}
+  .card-body{padding:16px}
+
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:6px;border:none;cursor:pointer;font-size:15px;font-family:inherit;font-weight:700;transition:all .15s;white-space:nowrap;min-height:44px}
+  .btn-primary{background:var(--accent);color:#fff}.btn-primary:hover{background:#2D5831}
+  .btn-secondary{background:var(--surface);color:var(--text);border:1px solid var(--border)}.btn-secondary:hover{background:var(--surface2)}
+  .btn-warn{background:var(--warn);color:#fff}.btn-warn:hover{background:#A06020}
+  .btn-sm{padding:6px 12px;font-size:13px;min-height:36px}
+  .btn-group{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+  .table-wrap{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:15px}
+  th{background:var(--surface2);color:var(--text2);font-weight:700;padding:10px 10px;text-align:center;border:1px solid var(--border);font-size:14px;white-space:nowrap}
+  td{padding:8px 10px;border:1px solid var(--border);text-align:center;vertical-align:middle}
+  td.left{text-align:left}
+  tr:hover td{background:#FAFAF8}
+
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+  .kpi{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+  .kpi-label{font-size:13px;color:var(--text2);margin-bottom:4px}
+  .kpi-value{font-size:24px;font-weight:700;line-height:1.2}
+  .kpi-value.green{color:var(--accent)}.kpi-value.warn{color:var(--warn)}.kpi-value.red{color:var(--danger)}
+  .kpi-sub{font-size:13px;color:var(--text3);margin-top:3px}
+
+  .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:13px;font-weight:700}
+  .badge-green{background:var(--accent-light);color:var(--accent)}
+  .badge-gray{background:var(--surface2);color:var(--text2)}
+
+  .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+  .form-group{display:flex;flex-direction:column;gap:5px}
+  .form-group label{font-size:14px;color:var(--text2);font-weight:500}
+  .form-group input,.form-group select,.form-group textarea{width:100%}
+
+  .week-grid{display:grid;gap:1px;background:var(--border);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .wc{background:var(--surface);padding:6px 8px;font-size:14px}
+  .wc.hdr{background:var(--surface2);font-weight:700;text-align:center;color:var(--text2);font-size:13px}
+  .wc.cat{background:var(--surface2);font-size:13px;display:flex;align-items:center;font-weight:500}
+  .wc input{width:100%;border:none;padding:3px 4px;font-size:14px;background:transparent;font-family:inherit;outline:none}
+  .wc input:focus{background:var(--accent-light);border-radius:3px}
+  .wc select{width:100%;border:none;padding:3px 4px;font-size:14px;background:transparent;font-family:inherit;outline:none;cursor:pointer}
+  .wc select:focus{background:var(--accent-light);border-radius:3px}
+  .wc.sat{background:#F0F4FF}
+
+  .shift-list{display:flex;flex-direction:column;gap:6px}
+  .shift-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)}
+  .shift-row:last-child{border-bottom:none}
+  .shift-name{flex:1;font-size:15px}
+
+  .alert{padding:11px 14px;border-radius:7px;font-size:15px;margin-bottom:12px}
+  .alert-warn{background:var(--warn-light);color:var(--warn)}
+  .loading{display:flex;align-items:center;justify-content:center;padding:48px;color:var(--text3)}
+  .spinner{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;margin-right:8px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .toast{position:fixed;bottom:20px;right:20px;background:#1A1A18;color:#fff;padding:13px 18px;border-radius:8px;font-size:15px;z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none;max-width:300px}
+  .toast.show{opacity:1}
+  .divider{height:1px;background:var(--border);margin:10px 0}
+  .text-right{text-align:right}.text-center{text-align:center}.text-muted{color:var(--text3)}
+  .text-green{color:var(--accent)}.text-warn{color:var(--warn)}.text-danger{color:var(--danger)}
+  .fw-bold{font-weight:700}.mb-12{margin-bottom:12px}.mb-16{margin-bottom:16px}
+  .flex{display:flex}.items-center{align-items:center}.gap-8{gap:8px}.gap-12{gap:12px}
+
+  @media print{
+    .sidebar,.topbar,.no-print{display:none!important}
+    .main{margin-left:0}
+    .content{padding:4px}
+    .card{box-shadow:none;border:1px solid #ccc;margin-bottom:8px;page-break-inside:avoid}
+    body{background:#fff;font-size:12px}
+    table{font-size:11px}
+    th,td{padding:3px 5px}
+    .print-header{display:block!important}
+    tr:has(td[id^="rt_"]:empty){display:none}
+    #plan-table{font-size:24px!important}
+    #plan-table th{font-size:18px!important}
+  }
+  .print-header{display:none;text-align:center;margin-bottom:8px}
+  .print-header h2{font-size:16px;font-weight:bold}
+  .print-header p{font-size:12px;margin-top:2px}
+  .print-only{display:none}
+  @media print{.print-only{display:flex!important;flex-wrap:wrap;gap:12px;justify-content:center;margin-bottom:6px;font-size:11px}}
+  #plan-table{font-size:24px}
+  #plan-table th{font-size:18px}
+  #plan-table input[type="number"]{font-size:24px!important;text-align:center}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <h1>惣菜本部 業務システム</h1>
+      <p>みかわ 弁当・惣菜部</p>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">日次業務</div>
+      <button class="nav-item active" onclick="showPage('plan')"   id="nav-plan">📋 出荷指示書</button>
+      <button class="nav-item"        onclick="showPage('actual')" id="nav-actual">✏️ 出荷実績入力</button>
+      <button class="nav-item"        onclick="showPage('report')" id="nav-report">📊 売上日報</button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">週次・月次</div>
+      <button class="nav-item" onclick="showPage('menu')"    id="nav-menu">🍱 週間献立</button>
+      <button class="nav-item" onclick="showPage('monthly')" id="nav-monthly">📈 月次サマリ</button>
+    </div>
+    <div class="nav-group admin-only">
+      <div class="nav-label">管理者</div>
+      <button class="nav-item" onclick="showPage('adminplan')"   id="nav-adminplan">📋 週間予定数入力</button>
+      <button class="nav-item" onclick="showPage('adminmenu')"   id="nav-adminmenu">🍱 週間献立表</button>
+      <button class="nav-item" onclick="showPage('adminshifts')" id="nav-adminshifts">📅 週間シフト予定</button>
+    </div>
+    <div class="nav-group admin-only">
+      <div class="nav-label">マスタ</div>
+      <button class="nav-item" onclick="showPage('master')"   id="nav-master">⚙️ 商品マスタ</button>
+      <button class="nav-item" onclick="showPage('channels')" id="nav-channels">🏪 出荷先マスタ</button>
+      <button class="nav-item" onclick="showPage('members')"  id="nav-members">👤 メンバーマスタ</button>
+    </div>
+    <div class="sidebar-bottom">
+      <div id="sidebar-date"></div>
+      <button onclick="showRoleSelection()" style="margin-top:8px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.6);border-radius:5px;padding:5px 10px;font-size:12px;cursor:pointer;width:100%;font-family:inherit" id="role-label">切り替え</button>
+    </div>
+  </nav>
+
+  <div class="main">
+    <header class="topbar">
+      <button onclick="toggleSidebar()" style="background:none;border:none;cursor:pointer;font-size:22px;padding:4px 8px;color:var(--text2);line-height:1;margin-right:8px" title="メニュー">☰</button>
+      <div class="page-title" id="page-title">出荷指示書</div>
+      <div class="topbar-right">
+        <label>対象日</label>
+        <input type="date" id="global-date" onchange="onDateChange()">
+      </div>
+    </header>
+    <main class="content" id="content">
+      <div class="loading"><div class="spinner"></div>読み込み中...</div>
+    </main>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<div id="role-overlay" style="position:fixed;inset:0;z-index:9999;background:#1A1A18;display:flex;align-items:center;justify-content:center">
+  <!-- ロール選択 -->
+  <div id="role-select-view" style="text-align:center;color:#fff;padding:40px">
+    <div style="font-size:13px;color:rgba(255,255,255,.4);margin-bottom:8px">みかわ 弁当・惣菜部</div>
+    <h2 style="font-size:24px;font-weight:700;margin-bottom:40px">惣菜本部 業務システム</h2>
+    <div style="display:flex;gap:20px;justify-content:center">
+      <button onclick="selectRole('member')"
+        style="background:#3B6E3F;color:#fff;border:none;border-radius:12px;padding:24px 40px;font-size:20px;font-weight:700;cursor:pointer;font-family:inherit;min-width:160px">
+        👤 メンバー
+      </button>
+      <button onclick="showPinInput()"
+        style="background:#555;color:#fff;border:none;border-radius:12px;padding:24px 40px;font-size:20px;font-weight:700;cursor:pointer;font-family:inherit;min-width:160px">
+        🔧 管理者
+      </button>
+    </div>
+  </div>
+  <!-- PIN入力 -->
+  <div id="pin-input-view" style="display:none;text-align:center;color:#fff;padding:40px">
+    <h2 style="font-size:22px;font-weight:700;margin-bottom:8px">管理者 PINコード</h2>
+    <p style="font-size:14px;color:rgba(255,255,255,.4);margin-bottom:28px">PINを入力してください</p>
+    <div style="display:flex;gap:12px;justify-content:center;margin-bottom:16px">
+      <input type="password" id="pin-input" maxlength="4" inputmode="numeric" pattern="[0-9]*"
+        onkeydown="if(event.key==='Enter')verifyPin()"
+        style="width:140px;font-size:32px;text-align:center;letter-spacing:12px;border-radius:10px;border:2px solid rgba(255,255,255,.3);background:rgba(255,255,255,.1);color:#fff;padding:12px;font-family:inherit;outline:none">
+    </div>
+    <div id="pin-error" style="color:#FF6B6B;font-size:14px;margin-bottom:16px;min-height:20px"></div>
+    <div style="display:flex;gap:12px;justify-content:center">
+      <button onclick="showRoleSelection()"
+        style="background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:8px;padding:10px 24px;font-size:15px;cursor:pointer;font-family:inherit">
+        ← 戻る
+      </button>
+      <button onclick="verifyPin()"
+        style="background:#3B6E3F;color:#fff;border:none;border-radius:8px;padding:10px 24px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">
+        確認
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:5050/api';
+const ADMIN_PIN = '1234'; // ← PINはここを変更
+let currentRole = sessionStorage.getItem('sozai_role') || null;
+
+function selectRole(role) {
+  currentRole = role;
+  sessionStorage.setItem('sozai_role', role);
+  document.getElementById('role-overlay').style.display = 'none';
+  applyRole(role);
+  if (!cachedProducts.length) initData();
+}
+
+function showRoleSelection() {
+  document.getElementById('role-select-view').style.display = '';
+  document.getElementById('pin-input-view').style.display = 'none';
+  document.getElementById('role-overlay').style.display = 'flex';
+}
+
+function showPinInput() {
+  document.getElementById('role-select-view').style.display = 'none';
+  document.getElementById('pin-input-view').style.display = '';
+  document.getElementById('pin-input').value = '';
+  document.getElementById('pin-error').textContent = '';
+  document.getElementById('role-overlay').style.display = 'flex';
+  setTimeout(() => document.getElementById('pin-input').focus(), 100);
+}
+
+function verifyPin() {
+  const entered = document.getElementById('pin-input').value;
+  if (entered === ADMIN_PIN) {
+    selectRole('admin');
+  } else {
+    document.getElementById('pin-error').textContent = 'PINコードが違います';
+    document.getElementById('pin-input').value = '';
+    document.getElementById('pin-input').focus();
+  }
+}
+
+function applyRole(role) {
+  const isAdmin = role === 'admin';
+  document.querySelectorAll('.admin-only').forEach(el => {
+    el.style.display = isAdmin ? '' : 'none';
+  });
+  document.getElementById('role-label').textContent =
+    (isAdmin ? '🔧 管理者' : '👤 メンバー') + '　切り替え';
+}
+
+function toggleSidebar() {
+  document.querySelector('.sidebar').classList.toggle('closed');
+  document.querySelector('.main').classList.toggle('sidebar-closed');
+}
+let currentPage = 'plan';
+let currentDate = new Date().toISOString().slice(0,10);
+let cachedProducts = [];
+let cachedChannels = [];
+let cachedMembers  = [];
+
+async function initData() {
+  try {
+    [cachedProducts, cachedChannels, cachedMembers] = await Promise.all([
+      fetch(API+'/products').then(r=>r.json()),
+      fetch(API+'/channels').then(r=>r.json()),
+      fetch(API+'/members').then(r=>r.json())
+    ]);
+  } catch(e) {
+    showToast('APIサーバー未起動。python app.py を実行してください。', true);
+  }
+  showPage('plan');
+}
+
+async function init() {
+  const d = new Date();
+  document.getElementById('global-date').value = currentDate;
+  document.getElementById('sidebar-date').textContent =
+    d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日（'+'日月火水木金土'[d.getDay()]+'）';
+  if (!currentRole) {
+    // ロール未選択：オーバーレイを表示したまま待つ
+    return;
+  }
+  applyRole(currentRole);
+  await initData();
+}
+
+function onDateChange() {
+  currentDate = document.getElementById('global-date').value;
+  showPage(currentPage);
+}
+
+function showPage(page) {
+  currentPage = page;
+  document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
+  document.getElementById('nav-'+page)?.classList.add('active');
+  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',monthly:'月次サマリ',master:'商品マスタ',channels:'出荷先マスタ',members:'メンバーマスタ',adminplan:'週間予定数入力',adminmenu:'週間献立表',adminshifts:'週間シフト予定'};
+  document.getElementById('page-title').textContent = titles[page]||'';
+  ({plan:renderPlanPage,actual:renderActualPage,report:renderReportPage,
+    menu:renderMenuPage,monthly:renderMonthlyPage,master:renderMasterPage,channels:renderChannelsPage,members:renderMembersPage,
+    adminplan:renderAdminPlanPage,adminmenu:renderAdminMenuPage,adminshifts:renderAdminShiftsPage})[page]?.();
+}
+
+function setLoading() {
+  document.getElementById('content').innerHTML = '<div class="loading"><div class="spinner"></div>読み込み中...</div>';
+}
+
+function showToast(msg, isErr=false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.background = isErr ? '#C0392B' : '#1A1A18';
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2800);
+}
+
+function fmt(n) { return Math.round(n||0).toLocaleString(); }
+
+function getMondayOf(dateStr) {
+  const dt = new Date(dateStr);
+  const dow = dt.getDay()===0 ? 6 : dt.getDay()-1;
+  const m = new Date(dt); m.setDate(dt.getDate()-dow);
+  return m.toISOString().slice(0,10);
+}
+
+function getWeekDays(mondayStr) {
+  return Array.from({length:6},(_,i)=>{
+    const d=new Date(mondayStr); d.setDate(d.getDate()+i); return d.toISOString().slice(0,10);
+  });
+}
+
+// ═══════════════════════════════════════════════
+// 出荷指示書（マトリクス表示）
+// 行：商品　列：出荷先　モード切替：一日 / 週間
+// ═══════════════════════════════════════════════
+let planViewMode = 'day'; // 'day' | 'week'
+
+async function renderPlanPage() {
+  setLoading();
+  const mondayStr = getMondayOf(currentDate);
+  const days = getWeekDays(mondayStr);
+  const DOW = ['月','火','水','木','金','土'];
+  const todayDow = (() => { const dt=new Date(currentDate); return dt.getDay()===0?5:dt.getDay()-1; })();
+  const todayDate = days[todayDow] || days[0];
+  const todayLabel = todayDate.slice(5).replace('-','/');
+
+  const plans = await fetch(`${API}/shipping-plans?date_from=${days[0]}&date_to=${days[5]}`).then(r=>r.json()).catch(()=>[]);
+
+  // planMap[date][product_id][channel_id] = qty
+  const planMap = {};
+  days.forEach(d => planMap[d]={});
+  plans.forEach(p => {
+    if(!planMap[p.date]) planMap[p.date]={};
+    if(!planMap[p.date][p.product_id]) planMap[p.date][p.product_id]={};
+    planMap[p.date][p.product_id][p.channel_id] = p.planned_qty;
+  });
+
+  const prods = cachedProducts;
+  const chs   = cachedChannels;
+
+  // ── 一日マトリクス ──────────────────────────────
+  // 行：商品　列：出荷先（西店・南店・市場・空港・医師会・NPO・合計）
+  function buildDayMatrix(targetDate) {
+    const chHeader = chs.map(ch=>`<th style="min-width:58px">${ch.name}</th>`).join('') + '<th style="min-width:52px;background:#E8F0E8">合計</th>';
+
+    const catOrder = ['弁当','寿司','惣菜','その他'];
+    let body = '';
+    catOrder.forEach(cat => {
+      const catProds = prods.filter(p=>p.category===cat);
+      if (!catProds.length) return;
+      body += `<tr><td class="fw-bold" colspan="${2+chs.length+1}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ ${cat}</td></tr>`;
+      catProds.forEach(p => {
+        const cells = chs.map(ch => {
+          const v = planMap[targetDate]?.[p.id]?.[ch.id] || 0;
+          return `<td><input type="number" min="0" value="${v}" data-date="${targetDate}" data-pid="${p.id}" data-cid="${ch.id}" style="width:64px" oninput="updateRowTotal(this)" onchange="dirty=true"></td>`;
+        }).join('');
+        const rowTotal = chs.reduce((s,ch)=>s+(planMap[targetDate]?.[p.id]?.[ch.id]||0),0);
+        body += `<tr>
+          <td class="left" style="white-space:nowrap">${p.name}</td>
+          <td style="color:var(--text3);font-size:11px;white-space:nowrap">¥${p.price.toLocaleString()}</td>
+          ${cells}
+          <td class="fw-bold" style="background:#F0F7F0" id="rt_${p.id}_${targetDate}">${rowTotal||''}</td>
+        </tr>`;
+      });
+    });
+
+    // 列合計行
+    const colTotals = chs.map(ch=>{
+      const t = prods.reduce((s,p)=>s+(planMap[targetDate]?.[p.id]?.[ch.id]||0),0);
+      return `<td class="fw-bold" style="background:#E8F0E8" id="ct_${ch.id}_${targetDate}">${t||''}</td>`;
+    }).join('');
+    const grandTotal = chs.reduce((s,ch)=>s+prods.reduce((ss,p)=>ss+(planMap[targetDate]?.[p.id]?.[ch.id]||0),0),0);
+    body += `<tr style="background:var(--surface2)">
+      <td class="fw-bold left" colspan="2" style="font-size:12px">合　計</td>
+      ${colTotals}
+      <td class="fw-bold" style="background:#D4EDDA">${grandTotal||''}</td>
+    </tr>`;
+
+    return `
+      <thead><tr>
+        <th style="min-width:130px;text-align:left">品名</th>
+        <th style="min-width:56px">価格</th>
+        ${chHeader}
+      </tr></thead>
+      <tbody>${body}</tbody>`;
+  }
+
+  // ── 週間マトリクス ──────────────────────────────
+  // 行：商品　列：月〜土（各曜日に出荷先をグループ化）
+  function buildWeekMatrix() {
+    // ヘッダー：1行目＝曜日グループ、2行目＝出荷先
+    const dayHeaders1 = days.map((d,i)=>{
+      const dt=new Date(d);
+      const isToday = d===currentDate;
+      return `<th colspan="${chs.length}" style="${isToday?'background:#D4EDDA':''};border-left:2px solid var(--border)">${(dt.getMonth()+1)}/${dt.getDate()}（${DOW[i]}）</th>`;
+    }).join('');
+    const dayHeaders2 = days.map(d=>
+      chs.map(ch=>{
+        const isToday = d===currentDate;
+        return `<th style="font-size:10px;font-weight:500;${isToday?'background:#EBF7EC':''};border-left:${ch===chs[0]?'2px':'1px'} solid var(--border)">${ch.name}</th>`;
+      }).join('')
+    ).join('');
+
+    const catOrder = ['弁当','寿司','惣菜','その他'];
+    let body = '';
+    catOrder.forEach(cat => {
+      const catProds = prods.filter(p=>p.category===cat);
+      if (!catProds.length) return;
+      body += `<tr><td class="fw-bold" colspan="${1+days.length*chs.length}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ ${cat}</td></tr>`;
+      catProds.forEach(p => {
+        const cells = days.map(d=>
+          chs.map(ch=>{
+            const v = planMap[d]?.[p.id]?.[ch.id]||0;
+            const isToday = d===currentDate;
+            return `<td style="${isToday?'background:#FFFDE7':''}${ch===chs[0]?';border-left:2px solid var(--border)':''}">
+              <input type="number" min="0" value="${v}" data-date="${d}" data-pid="${p.id}" data-cid="${ch.id}" style="width:56px;font-size:12px" onchange="dirty=true">
+            </td>`;
+          }).join('')
+        ).join('');
+        body += `<tr><td class="left" style="white-space:nowrap;font-size:12px">${p.name}</td>${cells}</tr>`;
+      });
+    });
+
+    return `
+      <thead>
+        <tr><th rowspan="2" style="min-width:120px;text-align:left">品名</th>${dayHeaders1}</tr>
+        <tr>${dayHeaders2}</tr>
+      </thead>
+      <tbody>${body}</tbody>`;
+  }
+
+  const isDayMode = planViewMode === 'day';
+  const tableContent = isDayMode ? buildDayMatrix(todayDate) : buildWeekMatrix();
+
+
+  document.getElementById('content').innerHTML = `
+    <div class="print-header"><h2>出荷指示書</h2><p>${todayDate}（${DOW[todayDow]}）　みかわ 惣菜部</p></div>
+    <div class="print-only">
+      <span>🍚 炊飯量：<strong id="rice-calc-p">―</strong></span>
+      <span>三色：<strong id="sansyoku-calc-p">―</strong></span>
+      <span>ちらし：<strong id="chirashi-calc-p">―</strong></span>
+      <span>🥚 玉子：<strong id="tamago-calc-p">―</strong></span>
+      <span>サラダ：<strong id="bento-calc-p">―</strong></span>
+      <span>天ぷら：<strong id="tenpura-calc-p">―</strong></span>
+    </div>
+    <div class="no-print btn-group mb-16">
+      <button class="btn btn-secondary btn-sm" onclick="copyLastWeek('${days[0]}')">◀ 前の週と同じ</button>
+      <button class="btn btn-primary btn-sm" onclick="savePlans()">💾 保存</button>
+      <div style="display:flex;gap:6px;margin:0 8px;background:var(--surface2);border-radius:6px;padding:3px;border:1px solid var(--border)">
+        <button class="btn btn-sm ${isDayMode?'btn-primary':'btn-secondary'}" style="padding:3px 12px" onclick="planViewMode='day';renderPlanPage()">一日</button>
+        <button class="btn btn-sm ${!isDayMode?'btn-primary':'btn-secondary'}" style="padding:3px 12px" onclick="planViewMode='week';renderPlanPage()">週間</button>
+      </div>
+      <div style="background:#FFF9C4;border:1px solid #F9A825;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
+        🍚 炊飯量：<span id="rice-calc">―</span>
+      </div>
+      <div style="background:#E8F4E9;border:1px solid #3B6E3F;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
+        三色：<span id="sansyoku-calc">―</span>
+      </div>
+      <div style="background:#FCE4EC;border:1px solid #E91E63;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
+        ちらし：<span id="chirashi-calc">―</span>
+      </div>
+      <div style="background:#FFF8E1;border:1px solid #FF8F00;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
+        🥚 玉子：<span id="tamago-calc">―</span>
+      </div>
+      <div style="background:#E8F5E9;border:1px solid #388E3C;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
+        サラダ：<span id="bento-calc">―</span>
+      </div>
+      <div style="background:#FBE9E7;border:1px solid #BF360C;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
+        天ぷら：<span id="tenpura-calc">―</span>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn btn-warn btn-sm" onclick="goToActual('${todayDate}')">✏️ ${todayLabel}の実績入力へ</button>
+        <button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 ${todayLabel}を印刷</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header no-print">
+        <span class="card-title">${isDayMode ? todayDate+'（'+DOW[todayDow]+'）の出荷計画' : '週間出荷計画　'+mondayStr+' 週'}</span>
+        <span class="text-muted" style="font-size:12px">行：商品　列：出荷先${isDayMode?'（合計自動計算）':''}</span>
+      </div>
+      <div class="table-wrap">
+        <table id="plan-table">${tableContent}</table>
+      </div>
+    </div>
+  `;
+  updateRiceCalc();
+}
+
+// 各種合計をリアルタイム更新
+function updateRiceCalc() {
+  const ricePids     = new Set(cachedProducts.filter(p=>p.subcategory==='白米').map(p=>p.id));
+  const sansyokuPids = new Set(cachedProducts.filter(p=>p.subcategory==='三色').map(p=>p.id));
+  const chirashiPids = new Set(cachedProducts.filter(p=>p.subcategory==='ちらし').map(p=>p.id));
+  const tamagoPids   = new Set(cachedProducts.filter(p=>
+    p.category==='弁当' &&
+    (p.name.includes('デラックス') || p.name.includes('1000') || p.name.includes('1200') ||
+     p.name.includes('1500') || p.name.includes('2000') || p.name.includes('2500')) &&
+    !p.name.includes('幕ノ内') && !p.name.includes('みかわ') && !p.name.includes('三色')
+  ).map(p=>p.id));
+  const saladPids    = new Set(cachedProducts.filter(p=>p.subcategory==='サラダ').map(p=>p.id));
+  const bentoPids    = new Set(cachedProducts.filter(p=>
+    p.category==='弁当' || p.name.includes('おかずセット')
+  ).map(p=>p.id));
+  const tenpuraPids  = new Set(cachedProducts.filter(p=>
+    (p.category==='弁当' && !p.name.includes('1500') && !p.name.includes('2000') && !p.name.includes('2500')) ||
+    p.name.includes('おかずセット')
+  ).map(p=>p.id));
+
+  let riceTotal=0, sansyokuTotal=0, chirashiTotal=0, tamagoTotal=0, saladTotal=0, bentoTotal=0, tenpuraTotal=0;
+  document.querySelectorAll('input[type="number"][data-pid]').forEach(inp => {
+    const pid = parseInt(inp.dataset.pid);
+    const v   = parseInt(inp.value) || 0;
+    if (ricePids.has(pid))     riceTotal     += v;
+    if (sansyokuPids.has(pid)) sansyokuTotal += v;
+    if (chirashiPids.has(pid)) chirashiTotal += v;
+    if (tamagoPids.has(pid))   tamagoTotal   += v;
+    if (saladPids.has(pid))    saladTotal    += v;
+    if (bentoPids.has(pid))    bentoTotal    += v;
+    if (tenpuraPids.has(pid))  tenpuraTotal  += v;
+  });
+
+  function toSho(n) { return Math.ceil(n * 185 / 3600 * 10) / 10; }
+  function set(id, val) { const el=document.getElementById(id); if(el) el.textContent=val; }
+
+  const vals = {
+    'rice-calc':     riceTotal     > 0 ? toSho(riceTotal).toFixed(1)+'升' : '―',
+    'sansyoku-calc': sansyokuTotal > 0 ? sansyokuTotal+'個' : '―',
+    'chirashi-calc': chirashiTotal > 0 ? chirashiTotal+'個・'+toSho(chirashiTotal).toFixed(1)+'升' : '―',
+    'tamago-calc':   tamagoTotal   > 0 ? tamagoTotal+'個' : '―',
+    'bento-calc':    bentoTotal    > 0 ? bentoTotal+'個' : '―',
+    'tenpura-calc':  tenpuraTotal  > 0 ? tenpuraTotal+'個' : '―',
+  };
+  Object.entries(vals).forEach(([id, v]) => { set(id, v); set(id+'-p', v); });
+}
+
+// 行合計・列合計をリアルタイム更新
+function updateRowTotal(inp) {
+  dirty = true;
+  const pid = inp.dataset.pid;
+  const date = inp.dataset.date;
+  // 行合計
+  const rowInputs = document.querySelectorAll(`#plan-table input[data-pid="${pid}"][data-date="${date}"]`);
+  const rowSum = Array.from(rowInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
+  const rtEl = document.getElementById(`rt_${pid}_${date}`);
+  if (rtEl) rtEl.textContent = rowSum || '';
+  // 列合計
+  const cid = inp.dataset.cid;
+  const colInputs = document.querySelectorAll(`#plan-table input[data-cid="${cid}"][data-date="${date}"]`);
+  const colSum = Array.from(colInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
+  const ctEl = document.getElementById(`ct_${cid}_${date}`);
+  if (ctEl) ctEl.textContent = colSum || '';
+  updateRiceCalc();
+}
+
+let dirty = false;
+
+async function savePlans() {
+  const inputs = document.querySelectorAll('#plan-table input[type="number"]');
+  const items = [];
+  inputs.forEach(inp => {
+    items.push({date:inp.dataset.date, product_id:+inp.dataset.pid, channel_id:+inp.dataset.cid, planned_qty:parseInt(inp.value)||0});
+  });
+  const r = await fetch(`${API}/shipping-plans/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(items)}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast(`${items.length}件保存しました`); dirty=false; }
+  else showToast('保存失敗',true);
+}
+
+async function copyLastWeek(dstFrom) {
+  const dst=new Date(dstFrom), src=new Date(dst);
+  src.setDate(dst.getDate()-7);
+  const srcEnd=new Date(src); srcEnd.setDate(src.getDate()+5);
+  const r = await fetch(`${API}/shipping-plans/week-copy`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({src_from:src.toISOString().slice(0,10),src_to:srcEnd.toISOString().slice(0,10),dst_from:dstFrom})
+  }).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast(`${r.copied}件コピーしました`); renderPlanPage(); }
+  else showToast('コピー失敗',true);
+}
+
+async function goToActual(date) {
+  await fetch(`${API}/shipping-actuals/init`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({date})}).then(r=>r.json()).catch(()=>{});
+  document.getElementById('global-date').value = date;
+  currentDate = date;
+  showPage('actual');
+}
+
+// ═══════════════════════════════════════════════
+// 出荷実績入力（マトリクス表示）
+// ═══════════════════════════════════════════════
+async function renderActualPage() {
+  setLoading();
+  const date = currentDate;
+  const mondayStr = getMondayOf(date);
+  const [actuals, shifts, shiftPlans, menus, savedInfo] = await Promise.all([
+    fetch(`${API}/shipping-actuals?date=${date}`).then(r=>r.json()).catch(()=>[]),
+    fetch(`${API}/shifts?date=${date}`).then(r=>r.json()).catch(()=>[]),
+    fetch(`${API}/shift-plans?date=${date}`).then(r=>r.json()).catch(()=>[]),
+    fetch(`${API}/weekly-menus?week_start=${mondayStr}`).then(r=>r.json()).catch(()=>[]),
+    fetch(`${API}/daily-reports/${date}`).then(r=>r.json()).catch(()=>null)
+  ]);
+
+  // 当日の献立から商品IDを取得
+  const dow = new Date(date).getDay() || 7; // 日=7(対象外), 月=1〜土=6
+  const todayMenuNames = new Set(
+    menus.filter(m=>m.day_of_week===dow && m.menu_name).map(m=>m.menu_name)
+  );
+  const menuPids = new Set(
+    cachedProducts.filter(p=>todayMenuNames.has(p.name)).map(p=>p.id)
+  );
+
+  const prods = cachedProducts;
+  const chs   = cachedChannels;
+
+  const actualMap = {};
+  actuals.forEach(r=>{ if(!actualMap[r.product_id]) actualMap[r.product_id]={}; actualMap[r.product_id][r.channel_id]=r.actual_qty||0; });
+
+  const activePids = new Set([...actuals.map(r=>r.product_id), ...menuPids]);
+  const activeProds = prods.filter(p=>activePids.has(p.id));
+
+  const chHeader = chs.map(ch=>`<th style="min-width:96px">${ch.name}</th>`).join('') +
+    '<th style="min-width:72px;background:#E8F0E8">合計</th>';
+
+  const catOrder = ['弁当','寿司','惣菜','その他'];
+  let tableBody = '';
+  catOrder.forEach(cat => {
+    const catProds = activeProds.filter(p=>p.category===cat);
+    if (!catProds.length) return;
+    tableBody += `<tr><td class="fw-bold" colspan="${1+chs.length+1}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ ${cat}</td></tr>`;
+    catProds.forEach(p => {
+      const cells = chs.map(ch => {
+        const actual = actualMap[p.id]?.[ch.id]||0;
+        return `<td style="padding:3px 5px">
+          <input type="number" min="0" value="${actual||''}" placeholder="0"
+            data-pid="${p.id}" data-cid="${ch.id}"
+            style="width:80px;font-size:20px;text-align:center;padding:4px 2px"
+            oninput="updateActualTotals(this)">
+        </td>`;
+      }).join('');
+      const actualTotal = chs.reduce((s,ch)=>s+(actualMap[p.id]?.[ch.id]||0),0);
+      tableBody += `<tr>
+        <td class="left" style="white-space:nowrap;font-weight:500">${p.name}</td>
+        ${cells}
+        <td class="fw-bold" style="background:#F0F7F0;text-align:center" id="at_${p.id}">${actualTotal||''}</td>
+      </tr>`;
+    });
+  });
+
+  const actColTotals = chs.map(ch=>prods.reduce((s,p)=>s+(actualMap[p.id]?.[ch.id]||0),0));
+  const actGrand = actColTotals.reduce((s,v)=>s+v,0);
+
+  tableBody += `
+    <tr style="background:#E8F7E8">
+      <td class="fw-bold left">合　計</td>
+      ${chs.map((_,i)=>`<td class="text-center fw-bold" id="ct_actual_${chs[i].id}">${actColTotals[i]||''}</td>`).join('')}
+      <td class="text-center fw-bold" style="background:#D4EDDA" id="grand_actual">${actGrand||''}</td>
+    </tr>
+  `;
+
+  // シフト（予定+実績）
+  const wageMap = {}; cachedMembers.forEach(m=>wageMap[m.name]=m.hourly_wage);
+  const shiftMap = {}; shifts.forEach(s=>shiftMap[s.member_name]=s.hours);
+  const planMap  = {}; shiftPlans.forEach(s=>planMap[s.member_name]=s.planned_hours);
+  // 予定あり or 実績あるメンバーを表示
+  const displayNames = [...new Set([...Object.keys(planMap), ...Object.keys(shiftMap)])];
+  const shiftRows = displayNames.map(n=>buildShiftRowHTML(n, shiftMap[n]??'', wageMap[n]||0, planMap[n]||0)).join('');
+  // ドロップダウン：上記以外のマスタメンバー
+  const dropdownOpts = cachedMembers
+    .filter(m=>!displayNames.includes(m.name))
+    .map(m=>`<option value="${m.name}" data-wage="${m.hourly_wage}" data-planned="0">${m.name}</option>`)
+    .join('');
+
+  document.getElementById('content').innerHTML = `
+    <div class="no-print btn-group mb-16">
+      <button class="btn btn-primary" onclick="saveActuals('${date}')">💾 実績・シフトを保存</button>
+      <button class="btn btn-warn"    onclick="generateReport('${date}')">📊 日報を生成する</button>
+      <div style="background:#FFF9C4;border:1px solid #F9A825;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
+        🍚 炊飯量：<span id="rice-calc">―</span>
+      </div>
+      <div style="background:#E8F4E9;border:1px solid #3B6E3F;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
+        三色：<span id="sansyoku-calc">―</span>
+      </div>
+      <div style="background:#FCE4EC;border:1px solid #E91E63;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
+        ちらし：<span id="chirashi-calc">―</span>
+      </div>
+      <div style="background:#FFF8E1;border:1px solid #FF8F00;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
+        🥚 玉子：<span id="tamago-calc">―</span>
+      </div>
+      <div style="background:#E8F5E9;border:1px solid #388E3C;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
+        サラダ：<span id="bento-calc">―</span>
+      </div>
+      <div style="background:#FBE9E7;border:1px solid #BF360C;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
+        天ぷら：<span id="tenpura-calc">―</span>
+      </div>
+      <span class="text-muted" style="font-size:12px;align-self:center">${date}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 260px;gap:16px;align-items:start">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">出荷実績入力　${date}</span>
+          <span class="text-muted" style="font-size:12px">行：商品　列：出荷先</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th style="text-align:left;min-width:120px">品名</th>
+              ${chHeader}
+            </tr></thead>
+            <tbody>${tableBody}</tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">シフト</span></div>
+          <div class="card-body">
+            <div style="display:grid;grid-template-columns:1fr 36px 56px 36px 28px;gap:4px;font-size:11px;color:var(--text3);padding:2px 0 4px;border-bottom:1px solid var(--border);margin-bottom:4px">
+              <span>名前</span><span style="text-align:right">予定</span><span style="text-align:center">実績</span><span style="text-align:center">差</span><span></span>
+            </div>
+            <div class="shift-list" id="shift-list">${shiftRows||'<div style="color:var(--text3);font-size:12px;padding:4px 0">メンバーを追加してください</div>'}</div>
+            <div class="divider"></div>
+            <div class="flex gap-8 items-center">
+              <select id="member-select" style="flex:1;font-size:13px">
+                <option value="">― メンバーを選択 ―</option>
+                ${dropdownOpts}
+              </select>
+              <button class="btn btn-primary btn-sm" onclick="addShiftRowFromMaster()">＋</button>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">日次情報</span></div>
+          <div class="card-body">
+            <div class="form-group mb-12">
+              <label>天気</label>
+              <select id="inp-weather">
+                <option value="">―</option>
+                ${['晴れ','曇り','雨','雪'].map(w=>`<option${savedInfo?.weather===w?' selected':''}>${w}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label>メモ・特記</label>
+              <textarea id="inp-note" rows="3" style="width:100%;resize:vertical">${savedInfo?.note||''}</textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  updateRiceCalc();
+}
+
+// マトリクス実績：行合計・列合計をリアルタイム更新
+function updateActualTotals(inp) {
+  const pid = inp.dataset.pid;
+  const cid = inp.dataset.cid;
+
+  // 行合計
+  const rowInputs = document.querySelectorAll(`table input[data-pid="${pid}"]`);
+  const rowActual = Array.from(rowInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
+  const atEl = document.getElementById(`at_${pid}`);
+  if (atEl) atEl.textContent = rowActual||'';
+
+  // 列合計
+  const colInputs = document.querySelectorAll(`table input[data-cid="${cid}"]`);
+  const colSum = Array.from(colInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
+  const ctEl = document.getElementById(`ct_actual_${cid}`);
+  if (ctEl) ctEl.textContent = colSum||'';
+
+  // 全体合計
+  const allInputs = document.querySelectorAll('table input[data-pid]');
+  const grandAct = Array.from(allInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
+  const gaEl = document.getElementById('grand_actual');
+  if (gaEl) gaEl.textContent = grandAct||'';
+  updateRiceCalc();
+}
+
+function buildShiftRowHTML(name, hours, wage, plannedHours) {
+  plannedHours = plannedHours || 0;
+  const actual = parseFloat(hours) || 0;
+  const hasActual = hours !== '' && hours !== undefined;
+  const diff = hasActual ? actual - plannedHours : null;
+  const diffStr  = diff === null ? '' : diff === 0 ? '±0' : diff > 0 ? `+${diff}` : `${diff}`;
+  const diffColor = diff < 0 ? 'var(--danger)' : diff > 0 ? 'var(--warn)' : 'var(--text3)';
+  return `<div class="shift-row" data-member="${name}" style="display:grid;grid-template-columns:1fr 36px 56px 36px 28px;gap:4px;align-items:center">
+    <span style="font-size:13px;white-space:nowrap;overflow:hidden">${name}</span>
+    <span style="font-size:12px;color:var(--text3);text-align:right">${plannedHours||'―'}</span>
+    <input type="number" min="0" max="24" step="0.5" value="${hours!==undefined&&hours!==''?hours:''}" placeholder="―"
+      style="width:56px;text-align:center" data-member="${name}" data-wage="${wage}" data-planned="${plannedHours}" class="shift-hr" oninput="updateShiftDiff(this)">
+    <span class="shift-diff" style="font-size:12px;text-align:center;color:${diffColor}">${diffStr}</span>
+    <button class="btn btn-secondary btn-sm" style="padding:2px 4px;color:var(--danger)" onclick="removeShiftRow(this)">×</button>
+  </div>`;
+}
+
+function addShiftRowFromMaster() {
+  const sel = document.getElementById('member-select');
+  const name = sel.value;
+  if (!name) return;
+  const opt = sel.options[sel.selectedIndex];
+  const wage    = parseInt(opt.dataset.wage)    || 0;
+  const planned = parseFloat(opt.dataset.planned) || 0;
+  const list = document.getElementById('shift-list');
+  const placeholder = list.querySelector('div[style]:not([data-member])');
+  if (placeholder) placeholder.remove();
+  list.insertAdjacentHTML('beforeend', buildShiftRowHTML(name, '', wage, planned));
+  rebuildMemberDropdown();
+}
+
+function removeShiftRow(btn) {
+  btn.closest('.shift-row').remove();
+  const list = document.getElementById('shift-list');
+  if (!list.querySelector('.shift-row')) {
+    list.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:4px 0">メンバーを追加してください</div>';
+  }
+  rebuildMemberDropdown();
+  updateLaborTotal();
+}
+
+function rebuildMemberDropdown() {
+  const sel = document.getElementById('member-select');
+  if (!sel) return;
+  const added = new Set(Array.from(document.querySelectorAll('#shift-list .shift-row')).map(r=>r.dataset.member));
+  const opts = cachedMembers
+    .filter(m=>!added.has(m.name))
+    .map(m=>`<option value="${m.name}" data-wage="${m.hourly_wage}" data-planned="0">${m.name}</option>`)
+    .join('');
+  sel.innerHTML = '<option value="">― メンバーを選択 ―</option>' + opts;
+}
+
+function updateShiftDiff(inp) {
+  const actual  = parseFloat(inp.value) ?? 0;
+  const planned = parseFloat(inp.dataset.planned) || 0;
+  const diff    = inp.value !== '' ? actual - planned : null;
+  const diffStr = diff === null ? '' : diff === 0 ? '±0' : diff > 0 ? `+${diff}` : `${diff}`;
+  const diffEl  = inp.closest('.shift-row')?.querySelector('.shift-diff');
+  if (diffEl) {
+    diffEl.textContent = diffStr;
+    diffEl.style.color = diff < 0 ? 'var(--danger)' : diff > 0 ? 'var(--warn)' : 'var(--text3)';
+  }
+}
+
+function updateLaborTotal() {
+  let total = 0;
+  document.querySelectorAll('.shift-hr').forEach(inp => {
+    const hours = parseFloat(inp.value) || 0;
+    const wage  = parseInt(inp.dataset.wage) || 0;
+    const sub   = Math.round(hours * wage);
+    total += sub;
+    const subEl = inp.closest('.shift-row')?.querySelector('.shift-sub');
+    if (subEl) subEl.textContent = sub > 0 ? '¥' + sub.toLocaleString() : '';
+  });
+  const el = document.getElementById('labor-total');
+  if (el) el.textContent = '¥' + total.toLocaleString();
+}
+
+async function saveActuals(date) {
+  const actualItems = [];
+  document.querySelectorAll('table input[type="number"][data-pid]').forEach(inp => {
+    actualItems.push({date, product_id:+inp.dataset.pid, channel_id:+inp.dataset.cid, actual_qty:parseInt(inp.value)||0});
+  });
+  const shiftItems = [];
+  document.querySelectorAll('.shift-hr').forEach(inp => {
+    const h = parseFloat(inp.value)||0;
+    if (h>0) shiftItems.push({member_name:inp.dataset.member, hours:h});
+  });
+  const weather = document.getElementById('inp-weather')?.value || '';
+  const note    = document.getElementById('inp-note')?.value || '';
+  await Promise.all([
+    fetch(`${API}/shipping-actuals/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(actualItems)}).then(r=>r.json()),
+    fetch(`${API}/shifts`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({date,shifts:shiftItems})}).then(r=>r.json()),
+    fetch(`${API}/daily-info/${date}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({weather,note})}).then(r=>r.json()),
+  ]);
+  showToast('実績・シフトを保存しました');
+}
+
+async function generateReport(date) {
+  await saveActuals(date);
+  const weather = document.getElementById('inp-weather')?.value||'';
+  const note    = document.getElementById('inp-note')?.value||'';
+  const r = await fetch(`${API}/daily-reports/${date}/generate`,{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({weather,note})
+  }).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) {
+    showToast('日報を生成しました');
+    document.getElementById('global-date').value = date;
+    currentDate = date;
+    showPage('report');
+  } else showToast('日報生成失敗',true);
+}
+
+// ═══════════════════════════════════════════════
+// 売上日報
+// ═══════════════════════════════════════════════
+async function renderReportPage() {
+  setLoading();
+  const date = currentDate;
+  const r = await fetch(`${API}/daily-reports/${date}`).then(res=>res.json()).catch(()=>null);
+
+  if (!r || !r.total_sales) {
+    document.getElementById('content').innerHTML = `
+      <div class="alert alert-warn">${date} の日報データがありません。実績入力から「日報を生成する」してください。</div>
+      <button class="btn btn-warn" onclick="showPage('actual')">✏️ 実績入力へ</button>`;
+    return;
+  }
+
+  const dt=new Date(date);
+  const dayLabel='日月火水木金土'[dt.getDay()];
+
+  // 売上マトリクス構築
+  const channels   = r.channels || [];
+  const details    = r.actuals_detail || [];
+  const detailMap  = {};
+  const prodInfo   = {};
+  details.forEach(d => {
+    if (!detailMap[d.product_id]) detailMap[d.product_id] = {};
+    detailMap[d.product_id][d.channel_id] = {qty: d.actual_qty, amount: d.actual_amount};
+    prodInfo[d.product_id] = {name: d.product_name, category: d.category, price: d.price};
+  });
+  const catOrder = ['弁当','寿司','惣菜','その他'];
+  const allPids  = [...new Set(details.map(d=>d.product_id))];
+  allPids.sort((a,b)=>{
+    const ca=catOrder.indexOf(prodInfo[a].category), cb=catOrder.indexOf(prodInfo[b].category);
+    return ca!==cb ? ca-cb : a-b;
+  });
+  const chTotals    = {}; channels.forEach(c=>chTotals[c.id]=0);
+  const chQtyTotals = {}; channels.forEach(c=>chQtyTotals[c.id]=0);
+  let grandTotal = 0, grandQty = 0;
+  let matrixBody = '';
+  let lastCat = null;
+  allPids.forEach(pid => {
+    const p = prodInfo[pid];
+    if (p.category !== lastCat) {
+      matrixBody += `<tr><td class="fw-bold" colspan="${3+channels.length}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ ${p.category}</td></tr>`;
+      lastCat = p.category;
+    }
+    let rowAmt = 0, rowQty = 0;
+    const cells = channels.map(c => {
+      const qty = detailMap[pid]?.[c.id]?.qty    || 0;
+      const amt = detailMap[pid]?.[c.id]?.amount || 0;
+      chTotals[c.id]    += amt;
+      chQtyTotals[c.id] += qty;
+      rowAmt += amt; rowQty += qty;
+      return `<td class="text-right">${qty ? qty : '―'}</td>`;
+    }).join('');
+    grandTotal += rowAmt; grandQty += rowQty;
+    matrixBody += `<tr>
+      <td class="left" style="white-space:nowrap">${p.name}</td>
+      <td class="text-right" style="color:var(--text2)">¥${fmt(p.price)}</td>
+      ${cells}
+      <td class="text-right fw-bold" style="background:#F5F5F5">${rowQty || '―'}</td>
+      <td class="text-right fw-bold" style="background:#F0F7F0">${rowAmt ? fmt(rowAmt) : '―'}</td>
+    </tr>`;
+  });
+  const totalCells = channels.map(c=>`<td class="text-right fw-bold" style="background:#E8F0E8">${chQtyTotals[c.id]||'―'}</td>`).join('');
+  matrixBody += `<tr style="background:var(--surface2)">
+    <td class="fw-bold left">合　計</td><td></td>${totalCells}
+    <td class="text-right fw-bold" style="background:#E8E8E8">${grandQty}</td>
+    <td class="text-right fw-bold" style="background:#D4EDDA">${fmt(grandTotal)}</td>
+  </tr>`;
+  const matrixHeader = channels.map(c=>`<th style="min-width:60px">${c.name}</th>`).join('');
+
+  // シフト行
+  const shiftRows = (r.shifts||[]).map(s=>`
+    <tr><td class="left">${s.member_name}</td><td class="text-right">${s.hours}h</td></tr>`).join('');
+
+  document.getElementById('content').innerHTML = `
+    <div class="print-header"><h2>惣菜部 売上日報</h2><p>${date}（${dayLabel}）　天気：${r.weather||'―'}</p></div>
+    <div class="no-print btn-group mb-16">
+      <button class="btn btn-secondary btn-sm" onclick="showPage('actual')">← 実績入力</button>
+      <div style="margin-left:auto"><button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 印刷</button></div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-label">天気</div><div class="kpi-value" style="font-size:20px">${r.weather||'―'}</div></div>
+      <div class="kpi"><div class="kpi-label">売上合計</div><div class="kpi-value green">${fmt(r.total_sales)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">材料費（50%）</div><div class="kpi-value warn">${fmt(r.material_cost)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">人件費</div><div class="kpi-value warn">${fmt(r.labor_cost)}</div><div class="kpi-sub">円　<span style="font-size:12px">(${r.total_sales>0?(r.labor_cost/r.total_sales*100).toFixed(1):'0.0'}%)</span></div></div>
+      <div class="kpi"><div class="kpi-label">経費（固定）</div><div class="kpi-value">${fmt(r.expense)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">差引利益</div><div class="kpi-value ${r.profit>=0?'green':'red'}">${fmt(r.profit)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi" style="background:${r.labor_productivity>5000?'#90CAF9':r.labor_productivity>4000?'#E3F2FD':r.labor_productivity>=3000?'#FFEBEE':''}">
+        <div class="kpi-label">人時売上</div>
+        <div class="kpi-value">${fmt(r.labor_productivity)}</div>
+        <div class="kpi-sub">円/時</div>
+      </div>
+      <div class="kpi"><div class="kpi-label">総人時</div><div class="kpi-value">${r.total_hours}</div><div class="kpi-sub">時間</div></div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="card-header">
+        <span class="card-title">品目×出荷先 売上明細</span>
+        <span class="text-muted" style="font-size:12px">金額（円）</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th style="text-align:left;min-width:130px">品名</th>
+            <th style="min-width:70px">単価</th>
+            ${matrixHeader}
+            <th style="min-width:56px;background:#E8E8E8">合計数</th>
+            <th style="min-width:80px;background:#E8F0E8">合計金額</th>
+          </tr></thead>
+          <tbody>${matrixBody||'<tr><td colspan="'+(2+channels.length)+'" class="text-muted text-center" style="padding:20px">実績データなし</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:16px;margin-bottom:16px;align-items:start">
+      <div class="card" style="margin-bottom:0;min-width:220px">
+        <div class="card-header"><span class="card-title">シフト</span></div>
+        <div class="card-body" style="padding:8px">
+          <table>
+            <thead><tr><th style="text-align:left">メンバー</th><th>時間</th></tr></thead>
+            <tbody>${shiftRows||'<tr><td colspan="2" class="text-muted text-center">データなし</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+      ${r.note ? `<div class="card" style="margin-bottom:0">
+        <div class="card-header"><span class="card-title">メモ・特記</span></div>
+        <div class="card-body" style="white-space:pre-wrap;font-size:15px;line-height:1.6">${r.note}</div>
+      </div>` : ''}
+    </div>
+
+    <div class="card no-print">
+      <div class="card-header"><span class="card-title">経費を修正して再計算</span></div>
+      <div class="card-body">
+        <div class="flex gap-12 items-center">
+          <div class="form-group">
+            <label>経費・固定費（円）</label>
+            <input type="number" id="adj-expense" value="${r.expense}" style="width:150px">
+          </div>
+          <button class="btn btn-primary btn-sm" style="margin-top:16px" onclick="updateExpense('${date}')">更新・再計算</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function updateExpense(date) {
+  const expense = parseInt(document.getElementById('adj-expense').value) || 0;
+  const r = await fetch(`${API}/daily-reports/${date}`).then(res=>res.json());
+  r.expense = expense;
+  r.profit  = (r.total_sales||0) - (r.material_cost||0) - (r.labor_cost||0) - expense;
+  r.labor_productivity = (r.total_hours>0) ? Math.round(r.total_sales/r.total_hours) : 0;
+  await fetch(`${API}/daily-reports/${date}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(r)});
+  showToast('経費を更新しました');
+  renderReportPage();
+}
+
+// ═══════════════════════════════════════════════
+// 週間献立
+// ═══════════════════════════════════════════════
+const MENU_CATS = ['メイン（煮物）','煮物①','煮物②','酢もの①','酢もの②','天ぷら','魚','サラダ①','サラダ②','漬物'];
+const SOUZAI_SUBCATS = ['煮物','酢もの','サラダ','魚','天ぷら','漬物','和え物','揚げ物','その他'];
+const BENTO_SUBCATS  = ['白米','三色','ちらし','炊き込み'];
+function getSubcats(cat) {
+  if (cat==='惣菜') return SOUZAI_SUBCATS;
+  if (cat==='弁当') return BENTO_SUBCATS;
+  return [];
+}
+const MENU_CAT_TO_SUBCAT = {
+  'メイン（煮物）':'煮物','煮物①':'煮物','煮物②':'煮物',
+  '酢もの①':'酢もの','酢もの②':'酢もの',
+  '天ぷら':'天ぷら','魚':'魚',
+  'サラダ①':'サラダ','サラダ②':'サラダ',
+  '漬物':'漬物',
+};
+const DOW_LABELS = ['月','火','水','木','金','土'];
+let extraMenuRowCount = 0;
+let _menuCurrentMonday = '';
+
+async function renderMenuPage() {
+  setLoading();
+  const mondayStr = getMondayOf(currentDate);
+  _menuCurrentMonday = mondayStr;
+  const days = getWeekDays(mondayStr);
+  const menus = await fetch(`${API}/weekly-menus?week_start=${mondayStr}`).then(r=>r.json()).catch(()=>[]);
+
+  const menuMap = {};
+  for(let d=1;d<=6;d++) menuMap[d]={};
+  menus.forEach(m=>{ if(!menuMap[m.day_of_week]) menuMap[m.day_of_week]={}; menuMap[m.day_of_week][m.category]=m.menu_name; });
+
+  const hdrCells = ['<div class="wc hdr cat" style="font-size:11px">カテゴリ</div>',
+    ...days.map((d,i)=>{
+      const dt=new Date(d);
+      return `<div class="wc hdr ${i===5?'sat':''}">${(dt.getMonth()+1)}/${dt.getDate()}<br>${DOW_LABELS[i]}</div>`;
+    })
+  ].join('');
+
+  const souzaiProds = cachedProducts.filter(p=>p.category==='惣菜');
+  const allProds    = cachedProducts;
+  const allProdOpts = '<option value="">―</option>' + allProds.map(p=>`<option value="${p.name}">${p.name}</option>`).join('');
+
+  // 固定行
+  const fixedRows = MENU_CATS.map(cat => {
+    const subcat = MENU_CAT_TO_SUBCAT[cat] || '';
+    const filtered = subcat ? souzaiProds.filter(p=>p.subcategory===subcat) : souzaiProds;
+    return ['<div class="wc cat">'+cat+'</div>',
+      ...days.map((_,i)=>{
+        const dow=i+1;
+        const cur = menuMap[dow]?.[cat]||'';
+        const opts = '<option value="">―</option>' + filtered.map(p=>`<option value="${p.name}"${p.name===cur?' selected':''}>${p.name}</option>`).join('');
+        return `<div class="wc ${i===5?'sat':''}"><select data-dow="${dow}" data-cat="${cat}">${opts}</select></div>`;
+      })
+    ].join('');
+  }).join('');
+
+  // 保存済みのおまかせ行を検出
+  const savedExtras = [...new Set(
+    menus.filter(m=>!MENU_CATS.includes(m.category)).map(m=>m.category)
+  )].sort();
+  extraMenuRowCount = savedExtras.reduce((max,cat)=>{
+    const n = parseInt(cat.split('_')[1])||0; return Math.max(max,n);
+  }, 0);
+
+  const extraRows = savedExtras.map(cat => buildExtraMenuRow(cat, days, menuMap, allProdOpts)).join('');
+
+  document.getElementById('content').innerHTML = `
+    <div class="no-print btn-group mb-16">
+      <button class="btn btn-secondary btn-sm" onclick="copyPrevWeekMenus('${mondayStr}')">◀ 前の週と同じ</button>
+      <button class="btn btn-primary" onclick="saveMenus('${mondayStr}')">💾 保存</button>
+      <span class="text-muted" style="font-size:12px;align-self:center">${mondayStr} 〜 ${days[5]}</span>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">週間献立表</span>
+        <button class="btn btn-secondary btn-sm no-print" onclick="addMenuRow()">＋ 行を追加</button>
+      </div>
+      <div class="card-body" style="padding:8px">
+        <div class="week-grid" id="menu-grid" style="grid-template-columns:110px repeat(6,1fr)">
+          ${hdrCells}${fixedRows}${extraRows}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function buildExtraMenuRow(catKey, days, menuMap, allProdOpts) {
+  const labelCell = `<div class="wc cat" data-extra-row="${catKey}" style="display:flex;align-items:center;justify-content:space-between">
+    <span>おまかせ</span>
+    <button class="btn btn-secondary btn-sm no-print" style="padding:1px 5px;color:var(--danger)" onclick="removeMenuRow('${catKey}')">×</button>
+  </div>`;
+  const dayCells = days.map((_,i)=>{
+    const dow=i+1;
+    const cur = menuMap?.[dow]?.[catKey]||'';
+    const opts = cachedProducts.length
+      ? '<option value="">―</option>' + cachedProducts.map(p=>`<option value="${p.name}"${p.name===cur?' selected':''}>${p.name}</option>`).join('')
+      : allProdOpts;
+    return `<div class="wc ${i===5?'sat':''}" data-extra-row="${catKey}"><select data-dow="${dow}" data-cat="${catKey}">${opts}</select></div>`;
+  }).join('');
+  return labelCell + dayCells;
+}
+
+function addMenuRow() {
+  extraMenuRowCount++;
+  const catKey = `おまかせ_${extraMenuRowCount}`;
+  const days = getWeekDays(_menuCurrentMonday);
+  const allProdOpts = '<option value="">―</option>' + cachedProducts.map(p=>`<option value="${p.name}">${p.name}</option>`).join('');
+  const html = buildExtraMenuRow(catKey, days, {}, allProdOpts);
+  document.getElementById('menu-grid').insertAdjacentHTML('beforeend', html);
+}
+
+function removeMenuRow(catKey) {
+  document.querySelectorAll(`[data-extra-row="${catKey}"]`).forEach(el=>el.remove());
+}
+
+async function saveMenus(weekStart) {
+  const inputs = document.querySelectorAll('.week-grid select');
+  const menus = [];
+  inputs.forEach(sel=>{ if(sel.value) menus.push({day_of_week:+sel.dataset.dow,category:sel.dataset.cat,menu_name:sel.value}); });
+  const r = await fetch(`${API}/weekly-menus`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({week_start:weekStart,menus})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) showToast('献立を保存しました'); else showToast('保存失敗',true);
+}
+
+// ═══════════════════════════════════════════════
+// 月次サマリ
+// ═══════════════════════════════════════════════
+async function renderMonthlyPage() {
+  setLoading();
+  const ym = currentDate.slice(0,7);
+  const data = await fetch(`${API}/monthly-summary?month=${ym}`).then(r=>r.json()).catch(()=>null);
+
+  if (!data?.days?.length) {
+    document.getElementById('content').innerHTML = `<div class="alert alert-warn">${ym} のデータがありません。</div>`;
+    return;
+  }
+  const s = data.summary;
+
+  const dayRows = data.days.map(d=>{
+    const dt=new Date(d.date);
+    const dow='日月火水木金土'[dt.getDay()];
+    return `<tr>
+      <td>${d.date.slice(5)}（${dow}）</td>
+      <td>${d.weather||'―'}</td>
+      <td class="text-right">${fmt(d.total_sales)}</td>
+      <td class="text-right">${fmt(d.west_sales)}</td>
+      <td class="text-right">${fmt(d.south_sales)}</td>
+      <td class="text-right">${fmt(d.other_sales)}</td>
+      <td class="text-right">${fmt(d.labor_cost)}</td>
+      <td class="text-right ${d.profit>=0?'text-green':'text-danger'}">${fmt(d.profit)}</td>
+      <td class="text-right">${fmt(d.labor_productivity)}</td>
+      <td class="text-right">${d.total_hours}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('content').innerHTML = `
+    <div class="print-header"><h2>惣菜部 月次サマリ</h2><p>${ym}</p></div>
+    <div class="no-print btn-group mb-16">
+      <input type="month" value="${ym}" onchange="document.getElementById('global-date').value=this.value+'-01';currentDate=this.value+'-01';renderMonthlyPage()" style="font-size:13px">
+      <div style="margin-left:auto"><button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 印刷</button></div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-label">合計売上</div><div class="kpi-value green">${fmt(s.total_sales)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">合計利益</div><div class="kpi-value ${s.total_profit>=0?'green':'red'}">${fmt(s.total_profit)}</div><div class="kpi-sub">円　利益率 ${s.profit_rate}%</div></div>
+      <div class="kpi"><div class="kpi-label">人件費計</div><div class="kpi-value warn">${fmt(s.total_labor)}</div><div class="kpi-sub">円　人件費率 ${s.labor_rate}%</div></div>
+      <div class="kpi"><div class="kpi-label">営業日数</div><div class="kpi-value">${s.op_days}</div><div class="kpi-sub">日</div></div>
+      <div class="kpi"><div class="kpi-label">日平均売上</div><div class="kpi-value">${fmt(s.avg_daily_sales)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">人時売平均</div><div class="kpi-value">${fmt(s.avg_labor_prod)}</div><div class="kpi-sub">円/時</div></div>
+    </div>
+    <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
+      <div class="kpi"><div class="kpi-label">西店売上</div><div class="kpi-value">${fmt(s.west_sales)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">南店売上</div><div class="kpi-value">${fmt(s.south_sales)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">その他</div><div class="kpi-value">${fmt(s.other_sales)}</div><div class="kpi-sub">円</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">日別明細</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>日付</th><th>天気</th><th>売上</th><th>西店</th><th>南店</th><th>その他</th>
+            <th>人件費</th><th>差引</th><th>人時売</th><th>総人時</th>
+          </tr></thead>
+          <tbody>${dayRows}</tbody>
+          <tfoot><tr class="fw-bold" style="background:var(--surface2)">
+            <td class="left">合計</td>
+            <td>―</td>
+            <td class="text-right">${fmt(s.total_sales)}</td>
+            <td class="text-right">${fmt(s.west_sales)}</td>
+            <td class="text-right">${fmt(s.south_sales)}</td>
+            <td class="text-right">${fmt(s.other_sales)}</td>
+            <td class="text-right">${fmt(s.total_labor)}</td>
+            <td class="text-right ${s.total_profit>=0?'text-green':'text-danger'}">${fmt(s.total_profit)}</td>
+            <td class="text-right">${fmt(s.avg_labor_prod)}</td>
+            <td class="text-right">―</td>
+          </tr></tfoot>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ═══════════════════════════════════════════════
+// 商品マスタ
+// ═══════════════════════════════════════════════
+function buildProdRow(p) {
+  const subcats = getSubcats(p.category);
+  const subcatSel = subcats.length
+    ? `<select id="ps${p.id}" style="width:80px;font-size:12px">
+        <option value="">―</option>
+        ${subcats.map(s=>`<option value="${s}"${p.subcategory===s?' selected':''}>${s}</option>`).join('')}
+       </select>`
+    : `<span style="color:var(--text3)">―</span>`;
+  return `<tr>
+    <td class="left"><input type="text" value="${p.name}" id="pn${p.id}" style="width:150px"></td>
+    <td><input type="number" value="${p.price}" id="pp${p.id}" style="width:75px"></td>
+    <td><select id="pc${p.id}" style="width:70px" onchange="toggleSubcatCell(${p.id},this.value)">
+      ${['弁当','寿司','惣菜','その他'].map(c=>`<option${c===p.category?' selected':''}>${c}</option>`).join('')}
+    </select></td>
+    <td id="psc${p.id}">${subcatSel}</td>
+    <td>
+      <button class="btn btn-primary btn-sm" onclick="updateProduct(${p.id})">更新</button>
+      <button class="btn btn-secondary btn-sm" style="margin-left:4px;color:var(--danger)" onclick="deleteProduct(${p.id})">削除</button>
+    </td>
+  </tr>`;
+}
+
+async function renderMasterPage() {
+  setLoading();
+  const prods = await fetch(`${API}/products`).then(r=>r.json()).catch(()=>[]);
+
+  const catOrder = ['弁当','寿司','惣菜','その他'];
+  let rows = '';
+  catOrder.forEach(cat => {
+    const catProds = prods.filter(p=>p.category===cat);
+    if (!catProds.length) return;
+    rows += `<tr><td colspan="5" class="fw-bold" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:4px 10px;text-align:left">▶ ${cat}</td></tr>`;
+    const subcats = getSubcats(cat);
+    if (subcats.length) {
+      subcats.forEach(sub => {
+        const subProds = catProds.filter(p=>p.subcategory===sub);
+        if (!subProds.length) return;
+        rows += `<tr><td colspan="5" style="background:var(--surface2);font-size:11px;padding:3px 10px 3px 22px;color:var(--text2)">└ ${sub}</td></tr>`;
+        rows += subProds.map(p=>buildProdRow(p)).join('');
+      });
+      const noSub = catProds.filter(p=>!p.subcategory);
+      if (noSub.length) {
+        rows += `<tr><td colspan="5" style="background:var(--surface2);font-size:11px;padding:3px 10px 3px 22px;color:var(--text2)">└ 未分類</td></tr>`;
+        rows += noSub.map(p=>buildProdRow(p)).join('');
+      }
+    } else {
+      rows += catProds.map(p=>buildProdRow(p)).join('');
+    }
+  });
+
+  const subcatOpts = SOUZAI_SUBCATS.map(s=>`<option value="${s}">${s}</option>`).join('');
+
+  document.getElementById('content').innerHTML = `
+    <div class="card mb-16">
+      <div class="card-header"><span class="card-title">商品マスタ</span><span class="text-muted" style="font-size:12px">${prods.length}件</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th style="text-align:left;min-width:150px">品名</th>
+            <th style="min-width:80px">価格（円）</th>
+            <th style="min-width:75px">分類</th>
+            <th style="min-width:85px">惣菜種別</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">商品を追加</span></div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="form-group"><label>品名</label><input type="text" id="new-pn" placeholder="からあげ弁当"></div>
+          <div class="form-group"><label>価格（円）</label><input type="number" id="new-pp" placeholder="450"></div>
+          <div class="form-group"><label>分類</label>
+            <select id="new-pc" onchange="const sc=getSubcats(this.value);document.getElementById('new-ps-group').style.display=sc.length?'':'none';document.getElementById('new-ps').innerHTML='<option value=\"\">―</option>'+sc.map(s=>'<option value=\"'+s+'\">'+s+'</option>').join('')">
+              <option>弁当</option><option>寿司</option><option>惣菜</option><option>その他</option>
+            </select>
+          </div>
+          <div class="form-group" id="new-ps-group" style="display:none"><label>惣菜種別</label>
+            <select id="new-ps"><option value="">―</option>${subcatOpts}</select>
+          </div>
+        </div>
+        <button class="btn btn-primary" style="margin-top:12px" onclick="addProduct()">＋ 追加</button>
+      </div>
+    </div>
+  `;
+}
+
+function toggleSubcatCell(id, catVal) {
+  const cell = document.getElementById('psc'+id);
+  if (!cell) return;
+  const subcats = getSubcats(catVal);
+  if (subcats.length) {
+    cell.innerHTML = `<select id="ps${id}" style="width:80px;font-size:12px">
+      <option value="">―</option>
+      ${subcats.map(s=>`<option value="${s}">${s}</option>`).join('')}
+    </select>`;
+  } else {
+    cell.innerHTML = '<span style="color:var(--text3)">―</span>';
+  }
+}
+
+async function updateProduct(id) {
+  const name     = document.getElementById('pn'+id).value.trim();
+  const price    = parseInt(document.getElementById('pp'+id).value)||0;
+  const category = document.getElementById('pc'+id).value;
+  const subcategory = document.getElementById('ps'+id)?.value || '';
+  const r = await fetch(`${API}/products/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name,price,category,subcategory,active:1})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('更新しました'); cachedProducts=await fetch(API+'/products').then(r=>r.json()); }
+  else showToast('更新失敗',true);
+}
+
+async function deleteProduct(id) {
+  if (!confirm('この商品を削除しますか？\n（出荷実績などの過去データには影響しません）')) return;
+  const name        = document.getElementById('pn'+id).value.trim();
+  const price       = parseInt(document.getElementById('pp'+id).value)||0;
+  const category    = document.getElementById('pc'+id).value;
+  const subcategory = document.getElementById('ps'+id)?.value || '';
+  const r = await fetch(`${API}/products/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name,price,category,subcategory,active:0})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('削除しました'); cachedProducts=await fetch(API+'/products').then(r=>r.json()); renderMasterPage(); }
+  else showToast('削除失敗',true);
+}
+
+async function addProduct() {
+  const name     = document.getElementById('new-pn').value.trim();
+  const price    = parseInt(document.getElementById('new-pp').value)||0;
+  const category = document.getElementById('new-pc').value;
+  const subcategory = getSubcats(category).length ? (document.getElementById('new-ps')?.value||'') : '';
+  if (!name) { showToast('品名を入力してください',true); return; }
+  const r = await fetch(`${API}/products`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name,price,category,subcategory})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('追加しました'); cachedProducts=await fetch(API+'/products').then(r=>r.json()); renderMasterPage(); }
+  else showToast('追加失敗',true);
+}
+
+
+// ═══════════════════════════════════════════════
+// 出荷先マスタ
+// ═══════════════════════════════════════════════
+async function renderChannelsPage() {
+  setLoading();
+  const channels = await fetch(`${API}/channels`).then(r=>r.json()).catch(()=>[]);
+
+  const rows = channels.map(c=>`
+    <tr>
+      <td><input type="text"   value="${c.name}"       id="chn${c.id}" style="width:160px"></td>
+      <td><input type="number" value="${c.sort_order}" id="cho${c.id}" style="width:60px;text-align:center" min="1"></td>
+      <td>
+        <button class="btn btn-primary btn-sm" onclick="updateChannel(${c.id})">更新</button>
+        <button class="btn btn-secondary btn-sm" style="margin-left:4px;color:var(--danger)" onclick="deleteChannel(${c.id}, '${c.name}')">削除</button>
+      </td>
+    </tr>`).join('');
+
+  document.getElementById('content').innerHTML = `
+    <div class="alert alert-warn no-print" style="margin-bottom:16px">
+      ⚠️ 出荷先名は出荷指示書・実績の列ラベルに使われます。変更すると過去データとの紐付けが崩れる場合があります。
+    </div>
+    <div class="card mb-16">
+      <div class="card-header">
+        <span class="card-title">出荷先マスタ</span>
+        <span class="text-muted" style="font-size:12px">${channels.length}件　※表示順はソート順で決まります</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th style="text-align:left;min-width:160px">出荷先名</th>
+            <th style="min-width:80px">ソート順</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${rows||'<tr><td colspan="3" class="text-muted text-center" style="padding:20px">登録なし</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">出荷先を追加</span></div>
+      <div class="card-body">
+        <div class="form-grid" style="grid-template-columns:1fr auto;gap:12px;align-items:end">
+          <div class="form-group">
+            <label>出荷先名 <span style="color:var(--danger)">*</span></label>
+            <input type="text" id="new-chn" placeholder="東店">
+          </div>
+          <button class="btn btn-primary" onclick="addChannel()">＋ 追加</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function addChannel() {
+  const name = document.getElementById('new-chn').value.trim();
+  if (!name) { showToast('出荷先名を入力してください', true); return; }
+  const r = await fetch(`${API}/channels`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) {
+    showToast('追加しました');
+    cachedChannels = await fetch(API+'/channels').then(r=>r.json());
+    renderChannelsPage();
+  } else showToast('追加失敗（同名の出荷先が既にある可能性があります）', true);
+}
+
+async function updateChannel(id) {
+  const name  = document.getElementById('chn'+id).value.trim();
+  const order = parseInt(document.getElementById('cho'+id).value) || 1;
+  if (!name) { showToast('出荷先名を入力してください', true); return; }
+  const r = await fetch(`${API}/channels/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, sort_order: order, active: 1})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) {
+    showToast('更新しました');
+    cachedChannels = await fetch(API+'/channels').then(r=>r.json());
+  } else showToast('更新失敗', true);
+}
+
+async function deleteChannel(id, name) {
+  if (!confirm(`「${name}」を削除しますか？\n過去の出荷データが残っている場合、集計に影響します。`)) return;
+  const order = parseInt(document.getElementById('cho'+id).value) || 1;
+  const r = await fetch(`${API}/channels/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, sort_order: order, active: 0})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) {
+    showToast('削除しました');
+    cachedChannels = await fetch(API+'/channels').then(r=>r.json());
+    renderChannelsPage();
+  } else showToast('削除失敗', true);
+}
+
+// ═══════════════════════════════════════════════
+// 管理者ページ
+// ═══════════════════════════════════════════════
+async function renderAdminPlanPage() {
+  planViewMode = 'week';
+  await renderPlanPage();
+}
+
+async function renderAdminMenuPage() {
+  await renderMenuPage();
+}
+
+async function copyPrevWeekMenus(dstMonday) {
+  const dst = new Date(dstMonday);
+  const src = new Date(dst); src.setDate(dst.getDate() - 7);
+  const srcStr = src.toISOString().slice(0, 10);
+  if (!confirm(`${srcStr} 週のメニューをコピーしますか？現在の入力は上書きされます。`)) return;
+  const r = await fetch(`${API}/weekly-menus/week-copy`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({src_start: srcStr, dst_start: dstMonday})
+  }).then(r => r.json()).catch(() => null);
+  if (r?.ok) { showToast(`${r.copied}件コピーしました`); renderMenuPage(); }
+  else showToast('コピー失敗', true);
+}
+
+async function renderAdminShiftsPage() {
+  setLoading();
+  const mondayStr = getMondayOf(currentDate);
+  const days = getWeekDays(mondayStr);
+  const DOW = ['月','火','水','木','金','土'];
+
+  const shifts = await fetch(`${API}/shifts/week?week_start=${mondayStr}`).then(r=>r.json()).catch(()=>[]);
+  const shiftMap = {};
+  shifts.forEach(s => {
+    if (!shiftMap[s.member_name]) shiftMap[s.member_name] = {};
+    shiftMap[s.member_name][s.date] = s.planned_hours;
+  });
+
+  const dayHeaders = days.map((d, i) => {
+    const dt = new Date(d);
+    return `<th style="min-width:64px;text-align:center">${(dt.getMonth()+1)}/${dt.getDate()}<br><span style="font-size:10px;font-weight:400">${DOW[i]}</span></th>`;
+  }).join('');
+
+  const rows = cachedMembers.map(m => {
+    const cells = days.map(d => {
+      const v = shiftMap[m.name]?.[d] || '';
+      return `<td><input type="number" min="0" max="24" step="0.5" value="${v}" placeholder="―"
+        style="width:52px;text-align:center;font-size:13px" data-member="${m.name}" data-date="${d}" class="week-shift-inp"></td>`;
+    }).join('');
+    return `<tr>
+      <td class="left" style="white-space:nowrap;font-weight:500">${m.name}</td>
+      <td style="color:var(--text3);font-size:12px;text-align:right">¥${m.hourly_wage.toLocaleString()}</td>
+      ${cells}
+    </tr>`;
+  }).join('');
+
+  document.getElementById('content').innerHTML = `
+    <div class="no-print btn-group mb-16">
+      <button class="btn btn-secondary btn-sm" onclick="copyPrevWeekShifts('${mondayStr}')">◀ 前の週と同じ</button>
+      <button class="btn btn-primary btn-sm" onclick="saveWeekShifts('${mondayStr}')">💾 保存</button>
+      <span class="text-muted" style="font-size:12px;align-self:center">${mondayStr} 〜 ${days[5]}</span>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">週間シフト予定</span>
+        <span class="text-muted" style="font-size:12px">時間数を入力</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th style="text-align:left;min-width:100px">メンバー</th>
+            <th style="min-width:60px;text-align:right">時給</th>
+            ${dayHeaders}
+          </tr></thead>
+          <tbody>${rows || '<tr><td colspan="8" class="text-muted text-center" style="padding:20px">メンバーマスタに登録してください</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+async function saveWeekShifts(mondayStr) {
+  const inputs = document.querySelectorAll('.week-shift-inp');
+  const shifts = [];
+  inputs.forEach(inp => {
+    const h = parseFloat(inp.value) || 0;
+    if (h > 0) shifts.push({date: inp.dataset.date, member_name: inp.dataset.member, hours: h});
+  });
+  const r = await fetch(`${API}/shifts/week-bulk`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({week_start: mondayStr, shifts})
+  }).then(r => r.json()).catch(() => null);
+  if (r?.ok) showToast('保存しました'); else showToast('保存失敗', true);
+}
+
+async function copyPrevWeekShifts(dstMonday) {
+  const dst = new Date(dstMonday);
+  const src = new Date(dst); src.setDate(dst.getDate() - 7);
+  const srcStr = src.toISOString().slice(0, 10);
+  if (!confirm(`${srcStr} 週のシフトをコピーしますか？現在の入力は上書きされます。`)) return;
+  const r = await fetch(`${API}/shifts/week-copy`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({src_start: srcStr, dst_start: dstMonday})
+  }).then(r => r.json()).catch(() => null);
+  if (r?.ok) { showToast(`${r.copied}件コピーしました`); renderAdminShiftsPage(); }
+  else showToast('コピー失敗', true);
+}
+
+// ═══════════════════════════════════════════════
+// メンバーマスタ
+// ═══════════════════════════════════════════════
+async function renderMembersPage() {
+  setLoading();
+  const members = await fetch(`${API}/members`).then(r=>r.json()).catch(()=>[]);
+
+  const rows = members.map(m=>`
+    <tr>
+      <td class="left"><input type="text"   value="${m.name}"        id="mn${m.id}" style="width:160px"></td>
+      <td>             <input type="number" value="${m.hourly_wage}" id="mw${m.id}" style="width:90px" min="0" placeholder="0"></td>
+      <td>
+        <button class="btn btn-primary btn-sm" onclick="updateMember(${m.id})">更新</button>
+        <button class="btn btn-secondary btn-sm" style="margin-left:4px;color:var(--danger)" onclick="deleteMember(${m.id})">削除</button>
+      </td>
+    </tr>`).join('');
+
+  document.getElementById('content').innerHTML = `
+    <div class="card mb-16">
+      <div class="card-header">
+        <span class="card-title">メンバーマスタ</span>
+        <span class="text-muted" style="font-size:12px">${members.length}名</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th style="text-align:left;min-width:160px">名前</th>
+            <th style="min-width:100px">時給（円）</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${rows||'<tr><td colspan="3" class="text-muted text-center" style="padding:20px">メンバーが登録されていません</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">メンバーを追加</span></div>
+      <div class="card-body">
+        <div class="form-grid" style="grid-template-columns:1fr 140px auto;gap:12px;align-items:end">
+          <div class="form-group">
+            <label>名前 <span style="color:var(--danger)">*</span></label>
+            <input type="text" id="new-mn" placeholder="山田 太郎">
+          </div>
+          <div class="form-group">
+            <label>時給（円）</label>
+            <input type="number" id="new-mw" placeholder="1000" min="0">
+          </div>
+          <button class="btn btn-primary" onclick="addMember()">＋ 追加</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function addMember() {
+  const name = document.getElementById('new-mn').value.trim();
+  if (!name) { showToast('名前を入力してください', true); return; }
+  const wage = parseInt(document.getElementById('new-mw').value) || 0;
+  const r = await fetch(`${API}/members`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, hourly_wage: wage})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('追加しました'); renderMembersPage(); }
+  else showToast('追加失敗（同名のメンバーが既にある可能性があります）', true);
+}
+
+async function updateMember(id) {
+  const name = document.getElementById('mn'+id).value.trim();
+  const wage = parseInt(document.getElementById('mw'+id).value) || 0;
+  if (!name) { showToast('名前を入力してください', true); return; }
+  const r = await fetch(`${API}/members/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, hourly_wage: wage, active: 1})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) showToast('更新しました'); else showToast('更新失敗', true);
+}
+
+async function deleteMember(id) {
+  const name = document.getElementById('mn'+id).value.trim();
+  if (!confirm(`「${name}」を削除しますか？`)) return;
+  const wage = parseInt(document.getElementById('mw'+id).value) || 0;
+  const r = await fetch(`${API}/members/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, hourly_wage: wage, active: 0})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('削除しました'); renderMembersPage(); }
+  else showToast('削除失敗', true);
+}
+
+init();
+</script>
+</body>
+</html>

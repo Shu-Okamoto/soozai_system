@@ -1,0 +1,13 @@
+# データベース（本番データを含むため除外）
+soozai.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
