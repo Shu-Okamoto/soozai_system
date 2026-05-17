@@ -5,6 +5,8 @@ soozai.db
 __pycache__/
 *.py[cod]
 *.pyo
+
+# 環境変数（APIキー等を含むため必ず除外）
 .env
 *.env
 
