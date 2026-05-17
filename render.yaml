@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: sozai-system
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    disk:
+      name: sozai-db
+      mountPath: /data
+      sizeGB: 1

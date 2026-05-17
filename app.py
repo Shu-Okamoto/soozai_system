@@ -44,7 +44,9 @@ def daily_expense(target_date_str):
 
 app = Flask(__name__)
 CORS(app)
-DB = os.path.join(os.path.dirname(__file__), 'soozai.db')
+# Renderの永続ディスク(/data)があればそちらを使用、なければローカル
+_data_dir = '/data' if os.path.isdir('/data') else os.path.dirname(__file__)
+DB = os.path.join(_data_dir, 'soozai.db')
 
 @app.route('/')
 def index():
