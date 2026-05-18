@@ -1373,8 +1373,6 @@ async function renderMasterPage() {
     }
   });
 
-  const subcatOpts = SOUZAI_SUBCATS.map(s=>`<option value="${s}">${s}</option>`).join('');
-
   document.getElementById('content').innerHTML = `
     <div class="card mb-16">
       <div class="card-header"><span class="card-title">商品マスタ</span><span class="text-muted" style="font-size:12px">${prods.length}件</span></div>
@@ -1397,13 +1395,22 @@ async function renderMasterPage() {
         <div class="form-grid">
           <div class="form-group"><label>品名</label><input type="text" id="new-pn" placeholder="からあげ弁当"></div>
           <div class="form-group"><label>価格（円）</label><input type="number" id="new-pp" placeholder="450"></div>
-          <div class="form-group"><label>分類</label>
-            <select id="new-pc" onchange="onNewProductCat(this.value)">
-              <option>弁当</option><option>寿司</option><option>惣菜</option><option>その他</option>
+          <div class="form-group"><label>分類・種別</label>
+            <select id="new-cat">
+              <option value="">― 選択してください ―</option>
+              <optgroup label="弁当">
+                ${BENTO_SUBCATS.map(s=>`<option value="弁当|${s}">${s}</option>`).join('')}
+              </optgroup>
+              <optgroup label="寿司">
+                <option value="寿司|">寿司</option>
+              </optgroup>
+              <optgroup label="惣菜">
+                ${SOUZAI_SUBCATS.map(s=>`<option value="惣菜|${s}">${s}</option>`).join('')}
+              </optgroup>
+              <optgroup label="その他">
+                <option value="その他|">その他</option>
+              </optgroup>
             </select>
-          </div>
-          <div class="form-group" id="new-ps-group" style="display:none"><label>惣菜種別</label>
-            <select id="new-ps"><option value="">―</option>${subcatOpts}</select>
           </div>
         </div>
         <button class="btn btn-primary" style="margin-top:12px" onclick="addProduct()">＋ 追加</button>
@@ -1412,14 +1419,6 @@ async function renderMasterPage() {
   `;
 }
 
-function onNewProductCat(val) {
-  const sc  = getSubcats(val);
-  const grp = document.getElementById('new-ps-group');
-  const sel = document.getElementById('new-ps');
-  if (!grp || !sel) return;
-  grp.style.display = sc.length ? '' : 'none';
-  sel.innerHTML = '<option value="">―</option>' + sc.map(s=>`<option value="${s}">${s}</option>`).join('');
-}
 
 function toggleSubcatCell(id, catVal) {
   const cell = document.getElementById('psc'+id);
@@ -1461,9 +1460,10 @@ async function deleteProduct(id) {
 async function addProduct() {
   const name     = document.getElementById('new-pn').value.trim();
   const price    = parseInt(document.getElementById('new-pp').value)||0;
-  const category = document.getElementById('new-pc').value;
-  const subcategory = getSubcats(category).length ? (document.getElementById('new-ps')?.value||'') : '';
-  if (!name) { showToast('品名を入力してください',true); return; }
+  const catVal = document.getElementById('new-cat').value;
+  if (!name)   { showToast('品名を入力してください',true); return; }
+  if (!catVal) { showToast('分類・種別を選択してください',true); return; }
+  const [category, subcategory] = catVal.split('|');
   const r = await fetch(`${API}/products`,{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({name,price,category,subcategory})}).then(r=>r.json()).catch(()=>null);
   if (r?.ok) { showToast('追加しました'); cachedProducts=await fetch(API+'/products').then(r=>r.json()); renderMasterPage(); }
