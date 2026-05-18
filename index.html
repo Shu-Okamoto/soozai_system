@@ -656,6 +656,7 @@ async function renderActualPage() {
 
   const activePids = new Set([...actuals.map(r=>r.product_id), ...menuPids]);
   const activeProds = prods.filter(p=>activePids.has(p.id));
+  const notShownProds = prods.filter(p=>p.active && !activePids.has(p.id));
 
   const chHeader = chs.map(ch=>`<th style="min-width:96px;font-size:20px">${ch.name}</th>`).join('') +
     '<th style="min-width:72px;background:#E8F0E8;font-size:20px">合計</th>';
@@ -689,7 +690,7 @@ async function renderActualPage() {
   const actGrand = actColTotals.reduce((s,v)=>s+v,0);
 
   tableBody += `
-    <tr style="background:#E8F7E8">
+    <tr style="background:#E8F7E8" data-total-row="1">
       <td class="fw-bold left">合　計</td>
       ${chs.map((_,i)=>`<td class="text-center fw-bold" id="ct_actual_${chs[i].id}">${actColTotals[i]||''}</td>`).join('')}
       <td class="text-center fw-bold" style="background:#D4EDDA" id="grand_actual">${actGrand||''}</td>
@@ -737,10 +738,16 @@ async function renderActualPage() {
       <div class="card">
         <div class="card-header">
           <span class="card-title">出荷実績入力　${date}</span>
-          <span class="text-muted" style="font-size:12px">行：商品　列：出荷先</span>
+          <div class="no-print" style="display:flex;gap:8px;align-items:center">
+            <select id="add-prod-select" style="font-size:14px;min-height:36px">
+              <option value="">― 商品を追加 ―</option>
+              ${notShownProds.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}
+            </select>
+            <button class="btn btn-secondary btn-sm" onclick="addActualProductRow()">＋ 追加</button>
+          </div>
         </div>
         <div class="table-wrap">
-          <table>
+          <table id="actual-table">
             <thead><tr>
               <th style="text-align:left;min-width:120px">品名</th>
               ${chHeader}
@@ -829,6 +836,30 @@ function buildShiftRowHTML(name, hours, wage, plannedHours) {
     <span class="shift-diff" style="font-size:12px;text-align:center;color:${diffColor}">${diffStr}</span>
     <button class="btn btn-secondary btn-sm" style="padding:2px 4px;color:var(--danger)" onclick="removeShiftRow(this)">×</button>
   </div>`;
+}
+
+function addActualProductRow() {
+  const sel = document.getElementById('add-prod-select');
+  const pid = parseInt(sel.value);
+  if (!pid) return;
+  const prod = cachedProducts.find(p=>p.id===pid);
+  if (!prod) return;
+  const chs = cachedChannels;
+  const cells = chs.map(ch=>`<td style="padding:3px 5px">
+    <input type="number" min="0" value="" placeholder="0"
+      data-pid="${pid}" data-cid="${ch.id}"
+      style="width:80px;font-size:20px;text-align:center;padding:4px 2px"
+      oninput="updateActualTotals(this)">
+  </td>`).join('');
+  const newRow = document.createElement('tr');
+  newRow.innerHTML = `<td class="left" style="white-space:nowrap;font-weight:500;font-size:20px">${prod.name}</td>${cells}<td class="fw-bold" style="background:#F0F7F0;text-align:center" id="at_${pid}"></td>`;
+  const tbody = document.querySelector('#actual-table tbody');
+  const totalRow = tbody.querySelector('tr[data-total-row]');
+  if (totalRow) tbody.insertBefore(newRow, totalRow);
+  else tbody.appendChild(newRow);
+  sel.querySelector(`option[value="${pid}"]`).remove();
+  sel.value = '';
+  updateRiceCalc();
 }
 
 function addShiftRowFromMaster() {
