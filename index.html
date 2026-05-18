@@ -454,7 +454,7 @@ async function renderPlanPage() {
             const v = planMap[d]?.[p.id]?.[ch.id]||0;
             const isToday = d===currentDate;
             return `<td style="${isToday?'background:#FFFDE7':''}${ch===chs[0]?';border-left:2px solid var(--border)':''}">
-              <input type="number" min="0" value="${v}" data-date="${d}" data-pid="${p.id}" data-cid="${ch.id}" style="width:64px;font-size:16px" onchange="dirty=true">
+              <input type="number" min="0" value="${v}" data-date="${d}" data-pid="${p.id}" data-cid="${ch.id}" style="width:44px;font-size:16px;padding:2px 1px" onchange="dirty=true">
             </td>`;
           }).join('')
         ).join('');
