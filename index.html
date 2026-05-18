@@ -1367,7 +1367,7 @@ async function renderMasterPage() {
           <div class="form-group"><label>品名</label><input type="text" id="new-pn" placeholder="からあげ弁当"></div>
           <div class="form-group"><label>価格（円）</label><input type="number" id="new-pp" placeholder="450"></div>
           <div class="form-group"><label>分類</label>
-            <select id="new-pc" onchange="const sc=getSubcats(this.value);document.getElementById('new-ps-group').style.display=sc.length?'':'none';document.getElementById('new-ps').innerHTML='<option value=\"\">―</option>'+sc.map(s=>'<option value=\"'+s+'\">'+s+'</option>').join('')">
+            <select id="new-pc" onchange="onNewProductCat(this.value)">
               <option>弁当</option><option>寿司</option><option>惣菜</option><option>その他</option>
             </select>
           </div>
@@ -1379,6 +1379,15 @@ async function renderMasterPage() {
       </div>
     </div>
   `;
+}
+
+function onNewProductCat(val) {
+  const sc  = getSubcats(val);
+  const grp = document.getElementById('new-ps-group');
+  const sel = document.getElementById('new-ps');
+  if (!grp || !sel) return;
+  grp.style.display = sc.length ? '' : 'none';
+  sel.innerHTML = '<option value="">―</option>' + sc.map(s=>`<option value="${s}">${s}</option>`).join('');
 }
 
 function toggleSubcatCell(id, catVal) {
