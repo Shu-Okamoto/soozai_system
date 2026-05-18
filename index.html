@@ -124,7 +124,8 @@
   .print-header h2{font-size:16px;font-weight:bold}
   .print-header p{font-size:12px;margin-top:2px}
   .print-only{display:none}
-  @media print{.print-only{display:flex!important;flex-wrap:wrap;gap:12px;justify-content:center;margin-bottom:6px;font-size:11px}}
+  @media print{.print-only{display:flex!important;flex-wrap:wrap;gap:16px;justify-content:center;margin-bottom:8px;font-size:16px}
+    .print-only strong{font-size:18px}}
   #plan-table{font-size:24px}
   #plan-table th{font-size:18px}
   #plan-table input[type="number"]{font-size:24px!important;text-align:center}
@@ -276,7 +277,10 @@ function toggleSidebar() {
   document.querySelector('.main').classList.toggle('sidebar-closed');
 }
 let currentPage = 'plan';
-let currentDate = new Date().toISOString().slice(0,10);
+let currentDate = (() => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+})();
 let cachedProducts = [];
 let cachedChannels = [];
 let cachedMembers  = [];
