@@ -438,7 +438,7 @@ async function renderPlanPage() {
     const dayHeaders2 = days.map(d=>
       chs.map(ch=>{
         const isToday = d===currentDate;
-        return `<th style="font-size:10px;font-weight:500;${isToday?'background:#EBF7EC':''};border-left:${ch===chs[0]?'2px':'1px'} solid var(--border)">${ch.name}</th>`;
+        return `<th style="font-size:16px;font-weight:500;${isToday?'background:#EBF7EC':''};border-left:${ch===chs[0]?'2px':'1px'} solid var(--border)">${ch.name}</th>`;
       }).join('')
     ).join('');
 
@@ -454,11 +454,11 @@ async function renderPlanPage() {
             const v = planMap[d]?.[p.id]?.[ch.id]||0;
             const isToday = d===currentDate;
             return `<td style="${isToday?'background:#FFFDE7':''}${ch===chs[0]?';border-left:2px solid var(--border)':''}">
-              <input type="number" min="0" value="${v}" data-date="${d}" data-pid="${p.id}" data-cid="${ch.id}" style="width:56px;font-size:12px" onchange="dirty=true">
+              <input type="number" min="0" value="${v}" data-date="${d}" data-pid="${p.id}" data-cid="${ch.id}" style="width:64px;font-size:16px" onchange="dirty=true">
             </td>`;
           }).join('')
         ).join('');
-        body += `<tr><td class="left" style="white-space:nowrap;font-size:12px">${p.name}</td>${cells}</tr>`;
+        body += `<tr><td class="left" style="white-space:nowrap;font-size:16px">${p.name}</td>${cells}</tr>`;
       });
     });
 
@@ -657,8 +657,8 @@ async function renderActualPage() {
   const activePids = new Set([...actuals.map(r=>r.product_id), ...menuPids]);
   const activeProds = prods.filter(p=>activePids.has(p.id));
 
-  const chHeader = chs.map(ch=>`<th style="min-width:96px">${ch.name}</th>`).join('') +
-    '<th style="min-width:72px;background:#E8F0E8">合計</th>';
+  const chHeader = chs.map(ch=>`<th style="min-width:96px;font-size:20px">${ch.name}</th>`).join('') +
+    '<th style="min-width:72px;background:#E8F0E8;font-size:20px">合計</th>';
 
   const catOrder = ['弁当','寿司','惣菜','その他'];
   let tableBody = '';
@@ -678,7 +678,7 @@ async function renderActualPage() {
       }).join('');
       const actualTotal = chs.reduce((s,ch)=>s+(actualMap[p.id]?.[ch.id]||0),0);
       tableBody += `<tr>
-        <td class="left" style="white-space:nowrap;font-weight:500">${p.name}</td>
+        <td class="left" style="white-space:nowrap;font-weight:500;font-size:20px">${p.name}</td>
         ${cells}
         <td class="fw-bold" style="background:#F0F7F0;text-align:center" id="at_${p.id}">${actualTotal||''}</td>
       </tr>`;
