@@ -402,7 +402,7 @@ async function renderPlanPage() {
         const rowTotal = chs.reduce((s,ch)=>s+(planMap[targetDate]?.[p.id]?.[ch.id]||0),0);
         body += `<tr>
           <td class="left" style="white-space:nowrap">${p.name}</td>
-          <td style="color:var(--text3);font-size:11px;white-space:nowrap">¥${p.price.toLocaleString()}</td>
+          <td style="color:var(--text3);font-size:16px;white-space:nowrap">¥${p.price.toLocaleString()}</td>
           ${cells}
           <td class="fw-bold" style="background:#F0F7F0" id="rt_${p.id}_${targetDate}">${rowTotal||''}</td>
         </tr>`;
@@ -474,12 +474,15 @@ async function renderPlanPage() {
       <tbody>${body}</tbody>`;
   }
 
-  const isDayMode = planViewMode === 'day';
+  // 出荷指示書(plan)は常に一日表示・週切替なし、週間予定数入力(adminplan)は週/日切替可
+  const isAdmin = currentPage === 'adminplan';
+  const isDayMode = isAdmin ? planViewMode === 'day' : true;
   const tableContent = isDayMode ? buildDayMatrix(todayDate) : buildWeekMatrix();
+  const pageTitle = isAdmin ? '週間予定数入力' : '出荷指示書';
 
 
   document.getElementById('content').innerHTML = `
-    <div class="print-header"><h2>出荷指示書</h2><p>${todayDate}（${DOW[todayDow]}）　みかわ 惣菜部</p></div>
+    <div class="print-header"><h2>${pageTitle}</h2><p>${todayDate}（${DOW[todayDow]}）　みかわ 惣菜部</p></div>
     <div class="print-only">
       <span>🍚 炊飯量：<strong id="rice-calc-p">―</strong></span>
       <span>三色：<strong id="sansyoku-calc-p">―</strong></span>
@@ -487,14 +490,15 @@ async function renderPlanPage() {
       <span>🥚 玉子：<strong id="tamago-calc-p">―</strong></span>
       <span>サラダ：<strong id="bento-calc-p">―</strong></span>
       <span>天ぷら：<strong id="tenpura-calc-p">―</strong></span>
+      <span>煮しめ：<strong id="nishime-calc-p">―</strong></span>
     </div>
     <div class="no-print btn-group mb-16">
-      <button class="btn btn-secondary btn-sm" onclick="copyLastWeek('${days[0]}')">◀ 前の週と同じ</button>
+      ${isAdmin ? `<button class="btn btn-secondary btn-sm" onclick="copyLastWeek('${days[0]}')">◀ 前の週と同じ</button>` : ''}
       <button class="btn btn-primary btn-sm" onclick="savePlans()">💾 保存</button>
-      <div style="display:flex;gap:6px;margin:0 8px;background:var(--surface2);border-radius:6px;padding:3px;border:1px solid var(--border)">
+      ${isAdmin ? `<div style="display:flex;gap:6px;margin:0 8px;background:var(--surface2);border-radius:6px;padding:3px;border:1px solid var(--border)">
         <button class="btn btn-sm ${isDayMode?'btn-primary':'btn-secondary'}" style="padding:3px 12px" onclick="planViewMode='day';renderPlanPage()">一日</button>
         <button class="btn btn-sm ${!isDayMode?'btn-primary':'btn-secondary'}" style="padding:3px 12px" onclick="planViewMode='week';renderPlanPage()">週間</button>
-      </div>
+      </div>` : ''}
       <div style="background:#FFF9C4;border:1px solid #F9A825;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
         🍚 炊飯量：<span id="rice-calc">―</span>
       </div>
@@ -513,8 +517,11 @@ async function renderPlanPage() {
       <div style="background:#FBE9E7;border:1px solid #BF360C;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
         天ぷら：<span id="tenpura-calc">―</span>
       </div>
+      <div style="background:#EFEBE9;border:1px solid #5D4037;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
+        煮しめ：<span id="nishime-calc">―</span>
+      </div>
       <div style="margin-left:auto;display:flex;gap:8px">
-        <button class="btn btn-warn btn-sm" onclick="goToActual('${todayDate}')">✏️ ${todayLabel}の実績入力へ</button>
+        ${isAdmin ? '' : `<button class="btn btn-warn btn-sm" onclick="goToActual('${todayDate}')">✏️ ${todayLabel}の実績入力へ</button>`}
         <button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 ${todayLabel}を印刷</button>
       </div>
     </div>
@@ -535,7 +542,9 @@ async function renderPlanPage() {
 function updateRiceCalc() {
   const ricePids     = new Set(cachedProducts.filter(p=>p.subcategory==='白米').map(p=>p.id));
   const sansyokuPids = new Set(cachedProducts.filter(p=>p.subcategory==='三色').map(p=>p.id));
-  const chirashiPids = new Set(cachedProducts.filter(p=>p.subcategory==='ちらし').map(p=>p.id));
+  const chirashiPids = new Set(cachedProducts.filter(p=>
+    p.subcategory==='ちらし' || p.name.includes('ちらし寿司')
+  ).map(p=>p.id));
   const tamagoPids   = new Set(cachedProducts.filter(p=>
     p.category==='弁当' &&
     (p.name.includes('デラックス') || p.name.includes('1000') || p.name.includes('1200') ||
@@ -550,9 +559,14 @@ function updateRiceCalc() {
     (p.category==='弁当' && !p.name.includes('1500') && !p.name.includes('2000') && !p.name.includes('2500')) ||
     p.name.includes('おかずセット')
   ).map(p=>p.id));
+  const nishimePids  = new Set(cachedProducts.filter(p=>
+    p.category==='弁当' &&
+    (p.name.includes('煮しめ') || p.name.includes('作り1500円') ||
+     p.name.includes('2000円') || p.name.includes('2500円') || p.name.includes('3000円'))
+  ).map(p=>p.id));
 
-  let riceTotal=0, sansyokuTotal=0, chirashiTotal=0, tamagoTotal=0, saladTotal=0, bentoTotal=0, tenpuraTotal=0;
-  document.querySelectorAll('input[type="number"][data-pid]').forEach(inp => {
+  let riceTotal=0, sansyokuTotal=0, chirashiTotal=0, tamagoTotal=0, saladTotal=0, bentoTotal=0, tenpuraTotal=0, nishimeTotal=0;
+  document.querySelectorAll('input[type="number"][data-pid][data-cid]').forEach(inp => {
     const pid = parseInt(inp.dataset.pid);
     const v   = parseInt(inp.value) || 0;
     if (ricePids.has(pid))     riceTotal     += v;
@@ -562,6 +576,7 @@ function updateRiceCalc() {
     if (saladPids.has(pid))    saladTotal    += v;
     if (bentoPids.has(pid))    bentoTotal    += v;
     if (tenpuraPids.has(pid))  tenpuraTotal  += v;
+    if (nishimePids.has(pid))  nishimeTotal  += v;
   });
 
   function toSho(n) { return Math.ceil(n * 185 / 3600 * 10) / 10; }
@@ -574,6 +589,7 @@ function updateRiceCalc() {
     'tamago-calc':   tamagoTotal   > 0 ? tamagoTotal+'個' : '―',
     'bento-calc':    bentoTotal    > 0 ? bentoTotal+'個' : '―',
     'tenpura-calc':  tenpuraTotal  > 0 ? tenpuraTotal+'個' : '―',
+    'nishime-calc':  nishimeTotal  > 0 ? nishimeTotal+'個' : '―',
   };
   Object.entries(vals).forEach(([id, v]) => { set(id, v); set(id+'-p', v); });
 }
@@ -656,13 +672,21 @@ async function renderActualPage() {
   const chs   = cachedChannels;
 
   const actualMap = {};
-  actuals.forEach(r=>{ if(!actualMap[r.product_id]) actualMap[r.product_id]={}; actualMap[r.product_id][r.channel_id]=r.actual_qty||0; });
+  const priceMap  = {};
+  actuals.forEach(r=>{
+    if(!actualMap[r.product_id]) actualMap[r.product_id]={};
+    actualMap[r.product_id][r.channel_id]=r.actual_qty||0;
+    if (r.actual_qty>0 && priceMap[r.product_id]===undefined) {
+      priceMap[r.product_id] = Math.round(r.actual_amount/r.actual_qty);
+    }
+  });
 
   const activePids = new Set([...actuals.map(r=>r.product_id), ...menuPids]);
   const activeProds = prods.filter(p=>activePids.has(p.id));
   const notShownProds = prods.filter(p=>p.active && !activePids.has(p.id));
 
-  const chHeader = chs.map(ch=>`<th style="min-width:96px;font-size:20px">${ch.name}</th>`).join('') +
+  const chHeader = '<th style="min-width:80px;font-size:18px">単価</th>' +
+    chs.map(ch=>`<th style="min-width:96px;font-size:20px">${ch.name}</th>`).join('') +
     '<th style="min-width:72px;background:#E8F0E8;font-size:20px">合計</th>';
 
   const catOrder = ['弁当','寿司','惣菜','その他'];
@@ -670,7 +694,7 @@ async function renderActualPage() {
   catOrder.forEach(cat => {
     const catProds = activeProds.filter(p=>p.category===cat);
     if (!catProds.length) return;
-    tableBody += `<tr><td class="fw-bold" colspan="${1+chs.length+1}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ ${cat}</td></tr>`;
+    tableBody += `<tr><td class="fw-bold" colspan="${2+chs.length+1}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ ${cat}</td></tr>`;
     catProds.forEach(p => {
       const cells = chs.map(ch => {
         const actual = actualMap[p.id]?.[ch.id]||0;
@@ -682,8 +706,15 @@ async function renderActualPage() {
         </td>`;
       }).join('');
       const actualTotal = chs.reduce((s,ch)=>s+(actualMap[p.id]?.[ch.id]||0),0);
+      const unitPrice = priceMap[p.id] ?? p.price;
       tableBody += `<tr>
         <td class="left" style="white-space:nowrap;font-weight:500;font-size:20px">${p.name}</td>
+        <td style="padding:3px 5px;background:#FFFDE7">
+          <input type="number" min="0" value="${unitPrice}" data-pid="${p.id}" class="unit-price"
+            title="本日の単価（マスタは変更されません）"
+            style="width:72px;font-size:18px;text-align:right;padding:4px 2px"
+            onchange="dirty=true">
+        </td>
         ${cells}
         <td class="fw-bold" style="background:#F0F7F0;text-align:center" id="at_${p.id}">${actualTotal||''}</td>
       </tr>`;
@@ -696,6 +727,7 @@ async function renderActualPage() {
   tableBody += `
     <tr style="background:#E8F7E8" data-total-row="1">
       <td class="fw-bold left">合　計</td>
+      <td></td>
       ${chs.map((_,i)=>`<td class="text-center fw-bold" id="ct_actual_${chs[i].id}">${actColTotals[i]||''}</td>`).join('')}
       <td class="text-center fw-bold" style="background:#D4EDDA" id="grand_actual">${actGrand||''}</td>
     </tr>
@@ -735,6 +767,9 @@ async function renderActualPage() {
       </div>
       <div style="background:#FBE9E7;border:1px solid #BF360C;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
         天ぷら：<span id="tenpura-calc">―</span>
+      </div>
+      <div style="background:#EFEBE9;border:1px solid #5D4037;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
+        煮しめ：<span id="nishime-calc">―</span>
       </div>
       <span class="text-muted" style="font-size:12px;align-self:center">${date}</span>
     </div>
@@ -806,7 +841,7 @@ function updateActualTotals(inp) {
   const cid = inp.dataset.cid;
 
   // 行合計
-  const rowInputs = document.querySelectorAll(`table input[data-pid="${pid}"]`);
+  const rowInputs = document.querySelectorAll(`table input[data-pid="${pid}"][data-cid]`);
   const rowActual = Array.from(rowInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
   const atEl = document.getElementById(`at_${pid}`);
   if (atEl) atEl.textContent = rowActual||'';
@@ -818,7 +853,7 @@ function updateActualTotals(inp) {
   if (ctEl) ctEl.textContent = colSum||'';
 
   // 全体合計
-  const allInputs = document.querySelectorAll('table input[data-pid]');
+  const allInputs = document.querySelectorAll('table input[data-pid][data-cid]');
   const grandAct = Array.from(allInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
   const gaEl = document.getElementById('grand_actual');
   if (gaEl) gaEl.textContent = grandAct||'';
@@ -928,9 +963,14 @@ function updateLaborTotal() {
 }
 
 async function saveActuals(date) {
+  const priceMap = {};
+  document.querySelectorAll('input.unit-price').forEach(inp => {
+    priceMap[inp.dataset.pid] = parseInt(inp.value)||0;
+  });
   const actualItems = [];
-  document.querySelectorAll('table input[type="number"][data-pid]').forEach(inp => {
-    actualItems.push({date, product_id:+inp.dataset.pid, channel_id:+inp.dataset.cid, actual_qty:parseInt(inp.value)||0});
+  document.querySelectorAll('table input[type="number"][data-pid][data-cid]').forEach(inp => {
+    actualItems.push({date, product_id:+inp.dataset.pid, channel_id:+inp.dataset.cid,
+      actual_qty:parseInt(inp.value)||0, unit_price:priceMap[inp.dataset.pid]});
   });
   const shiftItems = [];
   document.querySelectorAll('.shift-hr').forEach(inp => {
@@ -988,7 +1028,12 @@ async function renderReportPage() {
   details.forEach(d => {
     if (!detailMap[d.product_id]) detailMap[d.product_id] = {};
     detailMap[d.product_id][d.channel_id] = {qty: d.actual_qty, amount: d.actual_amount};
-    prodInfo[d.product_id] = {name: d.product_name, category: d.category, price: d.price};
+    if (!prodInfo[d.product_id]) {
+      prodInfo[d.product_id] = {name: d.product_name, category: d.category, price: d.price};
+    }
+    if (d.actual_qty > 0) {
+      prodInfo[d.product_id].price = Math.round(d.actual_amount / d.actual_qty);
+    }
   });
   const catOrder = ['弁当','寿司','惣菜','その他'];
   const allPids  = [...new Set(details.map(d=>d.product_id))];
@@ -1026,9 +1071,15 @@ async function renderReportPage() {
     </tr>`;
   });
   const totalCells = channels.map(c=>`<td class="text-right fw-bold" style="background:#E8F0E8">${chQtyTotals[c.id]||'―'}</td>`).join('');
+  const amtCells   = channels.map(c=>`<td class="text-right fw-bold" style="background:#F0F7F0;color:#2E7D32">${chTotals[c.id]?fmt(chTotals[c.id]):'―'}</td>`).join('');
   matrixBody += `<tr style="background:var(--surface2)">
-    <td class="fw-bold left">合　計</td><td></td>${totalCells}
+    <td class="fw-bold left">合計数</td><td></td>${totalCells}
     <td class="text-right fw-bold" style="background:#E8E8E8">${grandQty}</td>
+    <td class="text-right fw-bold" style="background:#D4EDDA">―</td>
+  </tr>
+  <tr style="background:var(--surface2)">
+    <td class="fw-bold left">合計金額</td><td></td>${amtCells}
+    <td class="text-right fw-bold" style="background:#E8E8E8">―</td>
     <td class="text-right fw-bold" style="background:#D4EDDA">${fmt(grandTotal)}</td>
   </tr>`;
   const matrixHeader = channels.map(c=>`<th style="min-width:60px">${c.name}</th>`).join('');
@@ -1335,41 +1386,52 @@ function buildProdRow(p) {
         ${subcats.map(s=>`<option value="${s}"${p.subcategory===s?' selected':''}>${s}</option>`).join('')}
        </select>`
     : `<span style="color:var(--text3)">―</span>`;
-  return `<tr>
+  const isActive = p.active !== 0;
+  const rowStyle = isActive ? '' : 'background:#FAFAFA;opacity:0.65';
+  const statusBadge = isActive
+    ? `<span style="background:#E8F5E9;color:#2E7D32;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">有効</span>`
+    : `<span style="background:#EEEEEE;color:#757575;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">無効</span>`;
+  const toggleBtn = isActive
+    ? `<button class="btn btn-secondary btn-sm" style="margin-left:4px;color:var(--danger)" onclick="setProductActive(${p.id},0)">無効化</button>`
+    : `<button class="btn btn-secondary btn-sm" style="margin-left:4px;color:#2E7D32" onclick="setProductActive(${p.id},1)">有効化</button>`;
+  return `<tr style="${rowStyle}">
     <td class="left"><input type="text" value="${p.name}" id="pn${p.id}" style="width:150px"></td>
     <td><input type="number" value="${p.price}" id="pp${p.id}" style="width:75px"></td>
     <td><select id="pc${p.id}" style="width:70px" onchange="toggleSubcatCell(${p.id},this.value)">
       ${['弁当','寿司','惣菜','その他'].map(c=>`<option${c===p.category?' selected':''}>${c}</option>`).join('')}
     </select></td>
     <td id="psc${p.id}">${subcatSel}</td>
+    <td class="text-center">${statusBadge}</td>
     <td>
       <button class="btn btn-primary btn-sm" onclick="updateProduct(${p.id})">更新</button>
-      <button class="btn btn-secondary btn-sm" style="margin-left:4px;color:var(--danger)" onclick="deleteProduct(${p.id})">削除</button>
+      ${toggleBtn}
     </td>
   </tr>`;
 }
 
 async function renderMasterPage() {
   setLoading();
-  const prods = await fetch(`${API}/products`).then(r=>r.json()).catch(()=>[]);
+  const prods = await fetch(`${API}/products?include_inactive=1`).then(r=>r.json()).catch(()=>[]);
+  const activeCount   = prods.filter(p=>p.active!==0).length;
+  const inactiveCount = prods.length - activeCount;
 
   const catOrder = ['弁当','寿司','惣菜','その他'];
   let rows = '';
   catOrder.forEach(cat => {
     const catProds = prods.filter(p=>p.category===cat);
     if (!catProds.length) return;
-    rows += `<tr><td colspan="5" class="fw-bold" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:4px 10px;text-align:left">▶ ${cat}</td></tr>`;
+    rows += `<tr><td colspan="6" class="fw-bold" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:4px 10px;text-align:left">▶ ${cat}</td></tr>`;
     const subcats = getSubcats(cat);
     if (subcats.length) {
       subcats.forEach(sub => {
         const subProds = catProds.filter(p=>p.subcategory===sub);
         if (!subProds.length) return;
-        rows += `<tr><td colspan="5" style="background:var(--surface2);font-size:11px;padding:3px 10px 3px 22px;color:var(--text2)">└ ${sub}</td></tr>`;
+        rows += `<tr><td colspan="6" style="background:var(--surface2);font-size:11px;padding:3px 10px 3px 22px;color:var(--text2)">└ ${sub}</td></tr>`;
         rows += subProds.map(p=>buildProdRow(p)).join('');
       });
       const noSub = catProds.filter(p=>!p.subcategory);
       if (noSub.length) {
-        rows += `<tr><td colspan="5" style="background:var(--surface2);font-size:11px;padding:3px 10px 3px 22px;color:var(--text2)">└ 未分類</td></tr>`;
+        rows += `<tr><td colspan="6" style="background:var(--surface2);font-size:11px;padding:3px 10px 3px 22px;color:var(--text2)">└ 未分類</td></tr>`;
         rows += noSub.map(p=>buildProdRow(p)).join('');
       }
     } else {
@@ -1379,7 +1441,10 @@ async function renderMasterPage() {
 
   document.getElementById('content').innerHTML = `
     <div class="card mb-16">
-      <div class="card-header"><span class="card-title">商品マスタ</span><span class="text-muted" style="font-size:12px">${prods.length}件</span></div>
+      <div class="card-header">
+        <span class="card-title">商品マスタ</span>
+        <span class="text-muted" style="font-size:12px">有効${activeCount}件 / 無効${inactiveCount}件　※無効商品は実績入力・献立等のセレクトに表示されません</span>
+      </div>
       <div class="table-wrap">
         <table>
           <thead><tr>
@@ -1387,6 +1452,7 @@ async function renderMasterPage() {
             <th style="min-width:80px">価格（円）</th>
             <th style="min-width:75px">分類</th>
             <th style="min-width:85px">惣菜種別</th>
+            <th style="min-width:60px">状態</th>
             <th></th>
           </tr></thead>
           <tbody>${rows}</tbody>
@@ -1449,16 +1515,19 @@ async function updateProduct(id) {
   else showToast('更新失敗',true);
 }
 
-async function deleteProduct(id) {
-  if (!confirm('この商品を削除しますか？\n（出荷実績などの過去データには影響しません）')) return;
+async function setProductActive(id, active) {
+  if (active===0 && !confirm('この商品を無効化しますか？\n（実績入力・献立等のセレクトに表示されなくなります。過去データには影響しません）')) return;
   const name        = document.getElementById('pn'+id).value.trim();
   const price       = parseInt(document.getElementById('pp'+id).value)||0;
   const category    = document.getElementById('pc'+id).value;
   const subcategory = document.getElementById('ps'+id)?.value || '';
   const r = await fetch(`${API}/products/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name,price,category,subcategory,active:0})}).then(r=>r.json()).catch(()=>null);
-  if (r?.ok) { showToast('削除しました'); cachedProducts=await fetch(API+'/products').then(r=>r.json()); renderMasterPage(); }
-  else showToast('削除失敗',true);
+    body:JSON.stringify({name,price,category,subcategory,active})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) {
+    showToast(active===1 ? '有効化しました' : '無効化しました');
+    cachedProducts = await fetch(API+'/products').then(r=>r.json());
+    renderMasterPage();
+  } else showToast('更新失敗',true);
 }
 
 async function addProduct() {

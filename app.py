@@ -53,7 +53,10 @@ def index():
 # ─── 商品マスタ ───────────────────────────────
 @app.route('/api/products', methods=['GET'])
 def get_products():
-    r = sb.table('hq_products').select('*').eq('active',1).order('category').order('id').execute()
+    q = sb.table('hq_products').select('*')
+    if request.args.get('include_inactive') != '1':
+        q = q.eq('active',1)
+    r = q.order('category').order('id').execute()
     return jsonify(r.data)
 
 @app.route('/api/products', methods=['POST'])
@@ -196,10 +199,24 @@ def bulk_save_actuals():
     items = request.json
     pids  = list({d['product_id'] for d in items})
     prods = {p['id']:p['price'] for p in sb.table('hq_products').select('id,price').in_('id',pids).execute().data} if pids else {}
+    def price_of(d):
+        up = d.get('unit_price')
+        return up if up is not None and up != '' else prods.get(d['product_id'], 0)
     rows  = [{'date':d['date'],'product_id':d['product_id'],'channel_id':d['channel_id'],
-              'actual_qty':d['actual_qty'],'actual_amount':d['actual_qty']*prods.get(d['product_id'],0)} for d in items]
+              'actual_qty':d['actual_qty'],'actual_amount':d['actual_qty']*price_of(d)} for d in items]
     if rows:
         sb.table('hq_shipping_actuals').upsert(rows, on_conflict='date,product_id,channel_id').execute()
+
+    # 既存日報があれば自動で再生成（カード値・月次集計を実績と一致させる）
+    dates = {d['date'] for d in items}
+    sync_keys = ['total_sales','material_cost','labor_cost','expense','profit','labor_productivity',
+                 'total_hours','west_sales','south_sales','other_sales','separate_orders']
+    for date in dates:
+        stored = sb.table('hq_daily_reports').select('expense').eq('date',date).execute().data
+        if not stored:
+            continue
+        calc = calc_daily_report(date, expense_override=stored[0].get('expense'))
+        sb.table('hq_daily_reports').update({k:calc[k] for k in sync_keys}).eq('date',date).execute()
     return jsonify({'ok': True})
 
 # ─── メンバーマスタ ───────────────────────────
@@ -229,11 +246,20 @@ def get_shifts():
 @app.route('/api/shifts', methods=['POST'])
 def save_shifts():
     d = request.json
-    sb.table('hq_shifts').delete().eq('date',d['date']).execute()
-    rows = [{'date':d['date'],'member_name':s['member_name'],'hours':s['hours']}
+    date = d['date']
+    sb.table('hq_shifts').delete().eq('date',date).execute()
+    rows = [{'date':date,'member_name':s['member_name'],'hours':s['hours']}
             for s in d['shifts'] if s.get('member_name','').strip() and s.get('hours',0)>0]
     if rows:
         sb.table('hq_shifts').insert(rows).execute()
+
+    # 既存日報があれば自動で再生成（人件費・利益・人時売を実績と一致させる）
+    stored = sb.table('hq_daily_reports').select('expense').eq('date',date).execute().data
+    if stored:
+        calc = calc_daily_report(date, expense_override=stored[0].get('expense'))
+        sync_keys = ['total_sales','material_cost','labor_cost','expense','profit','labor_productivity',
+                     'total_hours','west_sales','south_sales','other_sales','separate_orders']
+        sb.table('hq_daily_reports').update({k:calc[k] for k in sync_keys}).eq('date',date).execute()
     return jsonify({'ok': True})
 
 # ─── シフト週次管理（予定） ────────────────────
@@ -277,13 +303,20 @@ def copy_shifts_week():
     return jsonify({'ok': True, 'copied': len(rows)})
 
 # ─── 日報 ─────────────────────────────────────
-def calc_daily_report(target_date):
-    actuals  = sb.table('hq_shipping_actuals').select('actual_amount,product_id,channel_id').eq('date',target_date).execute().data
-    channels = {c['id']:c['name'] for c in sb.table('hq_channels').select('id,name').execute().data}
-    total    = sum(r['actual_amount'] for r in actuals)
-    west     = sum(r['actual_amount'] for r in actuals if channels.get(r['channel_id'])=='西店')
-    south    = sum(r['actual_amount'] for r in actuals if channels.get(r['channel_id'])=='南店')
-    other    = total - west - south
+def calc_daily_report(target_date, expense_override=None):
+    # 非活性の出荷先は売上集計から除外（売上明細マトリクスと一致させるため）
+    active_chs   = sb.table('hq_channels').select('id,name').eq('active',1).execute().data
+    active_cids  = {c['id'] for c in active_chs}
+    channels     = {c['id']:c['name'] for c in active_chs}
+    actuals_all  = sb.table('hq_shipping_actuals').select('actual_amount,product_id,channel_id').eq('date',target_date).execute().data
+    actuals      = [r for r in actuals_all if r['channel_id'] in active_cids]
+    total        = sum(r['actual_amount'] for r in actuals)
+    west         = sum(r['actual_amount'] for r in actuals if channels.get(r['channel_id'])=='西店')
+    south        = sum(r['actual_amount'] for r in actuals if channels.get(r['channel_id'])=='南店')
+    other        = total - west - south
+
+    betch_pids = {p['id'] for p in sb.table('hq_products').select('id').like('name','別注%').execute().data}
+    separate_orders = int(sum(r['actual_amount'] for r in actuals if r['product_id'] in betch_pids))
 
     shifts_data = sb.table('hq_shifts').select('hours,member_name').eq('date',target_date).execute().data
     total_hours = sum(s['hours'] for s in shifts_data)
@@ -292,7 +325,7 @@ def calc_daily_report(target_date):
     npo      = sum(r['actual_amount'] for r in actuals if r['product_id'] in npo_pids)
     total_with_npo = total + int(npo * 0.08)
     material = int(total_with_npo * 0.5)
-    expense  = daily_expense(target_date)
+    expense  = expense_override if expense_override is not None else daily_expense(target_date)
 
     wage_map   = {m['name']:m['hourly_wage'] for m in sb.table('hq_members').select('name,hourly_wage').execute().data}
     labor_cost = sum(int(s['hours']*wage_map.get(s['member_name'],0)) for s in shifts_data)
@@ -301,19 +334,32 @@ def calc_daily_report(target_date):
 
     return {'date':target_date,'total_sales':total,'material_cost':material,'labor_cost':labor_cost,
             'expense':expense,'profit':profit,'labor_productivity':round(labor_prod,1),
-            'total_hours':total_hours,'west_sales':west,'south_sales':south,'other_sales':other}
+            'total_hours':total_hours,'west_sales':west,'south_sales':south,'other_sales':other,
+            'separate_orders':separate_orders}
 
 @app.route('/api/daily-reports/<date_str>', methods=['GET'])
 def get_daily_report(date_str):
-    r      = sb.table('hq_daily_reports').select('*').eq('date',date_str).execute().data
-    result = r[0] if r else calc_daily_report(date_str)
+    stored = sb.table('hq_daily_reports').select('*').eq('date',date_str).execute().data
+    # 常に最新の集計を再計算（出荷先のactive化など状態変化に追従させるため）
+    calc   = calc_daily_report(date_str, expense_override=stored[0].get('expense') if stored else None)
+    if stored:
+        result = {**stored[0], **calc}
+        # 保存済みとズレていれば月次サマリのために遅延更新
+        sync_keys = ['total_sales','material_cost','labor_cost','profit','labor_productivity',
+                     'total_hours','west_sales','south_sales','other_sales','separate_orders']
+        if any(stored[0].get(k) != calc.get(k) for k in sync_keys):
+            sb.table('hq_daily_reports').update({k:calc[k] for k in sync_keys}).eq('date',date_str).execute()
+    else:
+        result = calc
 
+    active_chs    = sb.table('hq_channels').select('*').eq('active',1).order('sort_order').execute().data
+    active_cids   = {c['id'] for c in active_chs}
     actuals = sb.table('hq_shipping_actuals').select('*').eq('date',date_str).gt('actual_qty',0).execute().data
+    actuals = [a for a in actuals if a['channel_id'] in active_cids]
     if actuals:
         pids  = list({a['product_id'] for a in actuals})
-        cids  = list({a['channel_id']  for a in actuals})
         prods = {p['id']:p for p in sb.table('hq_products').select('id,name,category,price').in_('id',pids).execute().data}
-        chans = {c['id']:c for c in sb.table('hq_channels').select('id,name,sort_order').in_('id',cids).execute().data}
+        chans = {c['id']:c for c in active_chs}
         detail = []
         for a in actuals:
             row = dict(a); pr=prods.get(a['product_id'],{}); ch=chans.get(a['channel_id'],{})
@@ -325,7 +371,7 @@ def get_daily_report(date_str):
     else:
         result['actuals_detail'] = []
 
-    result['channels'] = sb.table('hq_channels').select('*').eq('active',1).order('sort_order').execute().data
+    result['channels'] = active_chs
     result['shifts']   = sb.table('hq_shifts').select('*').eq('date',date_str).order('member_name').execute().data
     return jsonify(result)
 
@@ -354,18 +400,13 @@ def generate_daily_report(date_str):
     calc    = calc_daily_report(date_str)
     weather = request.json.get('weather','') if request.json else ''
     note    = request.json.get('note','')    if request.json else ''
-    betch_pids = {p['id'] for p in sb.table('hq_products').select('id').like('name','別注%').execute().data}
-    actuals    = sb.table('hq_shipping_actuals').select('actual_amount,product_id').eq('date',date_str).execute().data
-    sep        = sum(a['actual_amount'] for a in actuals if a['product_id'] in betch_pids)
-
     existing = sb.table('hq_daily_reports').select('note').eq('date',date_str).execute().data
     saved_note = existing[0]['note'] if existing else note
-    data = {'date':date_str,'weather':weather,'total_sales':calc['total_sales'],'separate_orders':int(sep),
+    data = {'date':date_str,'weather':weather,'total_sales':calc['total_sales'],'separate_orders':calc['separate_orders'],
             'material_cost':calc['material_cost'],'labor_cost':calc['labor_cost'],'expense':calc['expense'],
             'profit':calc['profit'],'labor_productivity':calc['labor_productivity'],'total_hours':calc['total_hours'],
             'west_sales':calc['west_sales'],'south_sales':calc['south_sales'],'other_sales':calc['other_sales'],'note':saved_note}
     sb.table('hq_daily_reports').upsert(data, on_conflict='date').execute()
-    calc['separate_orders'] = int(sep)
     return jsonify({'ok': True, **calc})
 
 # ─── 月次サマリ ────────────────────────────────
