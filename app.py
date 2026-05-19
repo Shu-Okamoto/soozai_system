@@ -91,6 +91,122 @@ def update_channel(cid):
     sb.table('hq_channels').update({'name':d['name'],'sort_order':d.get('sort_order',0),'active':d.get('active',1)}).eq('id',cid).execute()
     return jsonify({'ok': True})
 
+# ─── カテゴリマスタ ───────────────────────────
+@app.route('/api/categories', methods=['GET'])
+def get_categories():
+    q = sb.table('hq_categories').select('*')
+    if request.args.get('include_inactive') != '1':
+        q = q.eq('active',1)
+    r = q.order('sort_order').order('id').execute()
+    return jsonify(r.data)
+
+@app.route('/api/categories', methods=['POST'])
+def add_category():
+    d = request.json
+    name = (d.get('name') or '').strip()
+    if not name:
+        return jsonify({'ok': False, 'error': 'カテゴリ名が空です'}), 400
+    r = sb.table('hq_categories').select('sort_order').order('sort_order', desc=True).limit(1).execute()
+    max_order = r.data[0]['sort_order'] if r.data else 0
+    try:
+        sb.table('hq_categories').insert({'name':name,'sort_order':max_order+1}).execute()
+    except Exception as e:
+        return jsonify({'ok': False, 'error': '同名のカテゴリが既にあります'}), 400
+    return jsonify({'ok': True})
+
+@app.route('/api/categories/<int:cid>', methods=['PUT'])
+def update_category(cid):
+    d = request.json
+    new_name = (d.get('name') or '').strip()
+    if not new_name:
+        return jsonify({'ok': False, 'error': 'カテゴリ名が空です'}), 400
+    old = sb.table('hq_categories').select('name').eq('id',cid).execute().data
+    if not old:
+        return jsonify({'ok': False, 'error': 'not found'}), 404
+    old_name = old[0]['name']
+    sb.table('hq_categories').update({
+        'name':new_name,'sort_order':d.get('sort_order',0),'active':d.get('active',1)
+    }).eq('id',cid).execute()
+    # リネーム時は使用中商品もカスケード更新
+    if old_name != new_name:
+        sb.table('hq_products').update({'category':new_name}).eq('category',old_name).execute()
+    return jsonify({'ok': True})
+
+@app.route('/api/categories/<int:cid>', methods=['DELETE'])
+def delete_category(cid):
+    r = sb.table('hq_categories').select('name').eq('id',cid).execute().data
+    if not r:
+        return jsonify({'ok': False, 'error': 'not found'}), 404
+    name = r[0]['name']
+    used = sb.table('hq_products').select('id').eq('category',name).execute().data
+    if used:
+        return jsonify({'ok': False, 'error': f'使用中の商品が{len(used)}件あるため削除できません'}), 400
+    sb.table('hq_subcategories').delete().eq('category_id',cid).execute()
+    sb.table('hq_categories').delete().eq('id',cid).execute()
+    return jsonify({'ok': True})
+
+@app.route('/api/subcategories', methods=['GET'])
+def get_subcategories():
+    q = sb.table('hq_subcategories').select('*')
+    if request.args.get('include_inactive') != '1':
+        q = q.eq('active',1)
+    cat_id = request.args.get('category_id')
+    if cat_id:
+        q = q.eq('category_id', int(cat_id))
+    r = q.order('category_id').order('sort_order').order('id').execute()
+    return jsonify(r.data)
+
+@app.route('/api/subcategories', methods=['POST'])
+def add_subcategory():
+    d = request.json
+    name = (d.get('name') or '').strip()
+    cat_id = d.get('category_id')
+    if not name or not cat_id:
+        return jsonify({'ok': False, 'error': 'カテゴリ・サブカテゴリ名が必要です'}), 400
+    r = sb.table('hq_subcategories').select('sort_order').eq('category_id',cat_id).order('sort_order', desc=True).limit(1).execute()
+    max_order = r.data[0]['sort_order'] if r.data else 0
+    try:
+        sb.table('hq_subcategories').insert({'category_id':cat_id,'name':name,'sort_order':max_order+1}).execute()
+    except Exception:
+        return jsonify({'ok': False, 'error': '同名のサブカテゴリが既にあります'}), 400
+    return jsonify({'ok': True})
+
+@app.route('/api/subcategories/<int:sid>', methods=['PUT'])
+def update_subcategory(sid):
+    d = request.json
+    new_name = (d.get('name') or '').strip()
+    if not new_name:
+        return jsonify({'ok': False, 'error': 'サブカテゴリ名が空です'}), 400
+    old = sb.table('hq_subcategories').select('name,category_id').eq('id',sid).execute().data
+    if not old:
+        return jsonify({'ok': False, 'error': 'not found'}), 404
+    old_name = old[0]['name']
+    cat_id   = old[0]['category_id']
+    sb.table('hq_subcategories').update({
+        'name':new_name,'sort_order':d.get('sort_order',0),'active':d.get('active',1)
+    }).eq('id',sid).execute()
+    # 同カテゴリ内のリネームのみカスケード
+    if old_name != new_name:
+        cat = sb.table('hq_categories').select('name').eq('id',cat_id).execute().data
+        if cat:
+            sb.table('hq_products').update({'subcategory':new_name}).eq('category',cat[0]['name']).eq('subcategory',old_name).execute()
+    return jsonify({'ok': True})
+
+@app.route('/api/subcategories/<int:sid>', methods=['DELETE'])
+def delete_subcategory(sid):
+    r = sb.table('hq_subcategories').select('name,category_id').eq('id',sid).execute().data
+    if not r:
+        return jsonify({'ok': False, 'error': 'not found'}), 404
+    name   = r[0]['name']
+    cat_id = r[0]['category_id']
+    cat = sb.table('hq_categories').select('name').eq('id',cat_id).execute().data
+    if cat:
+        used = sb.table('hq_products').select('id').eq('category',cat[0]['name']).eq('subcategory',name).execute().data
+        if used:
+            return jsonify({'ok': False, 'error': f'使用中の商品が{len(used)}件あるため削除できません'}), 400
+    sb.table('hq_subcategories').delete().eq('id',sid).execute()
+    return jsonify({'ok': True})
+
 # ─── 週間献立 ──────────────────────────────────
 @app.route('/api/weekly-menus', methods=['GET'])
 def get_weekly_menus():

@@ -157,9 +157,10 @@
     </div>
     <div class="nav-group admin-only">
       <div class="nav-label">マスタ</div>
-      <button class="nav-item" onclick="showPage('master')"   id="nav-master">⚙️ 商品マスタ</button>
-      <button class="nav-item" onclick="showPage('channels')" id="nav-channels">🏪 出荷先マスタ</button>
-      <button class="nav-item" onclick="showPage('members')"  id="nav-members">👤 メンバーマスタ</button>
+      <button class="nav-item" onclick="showPage('master')"     id="nav-master">⚙️ 商品マスタ</button>
+      <button class="nav-item" onclick="showPage('categories')" id="nav-categories">🏷 カテゴリマスタ</button>
+      <button class="nav-item" onclick="showPage('channels')"   id="nav-channels">🏪 出荷先マスタ</button>
+      <button class="nav-item" onclick="showPage('members')"    id="nav-members">👤 メンバーマスタ</button>
     </div>
     <div class="sidebar-bottom">
       <div id="sidebar-date"></div>
@@ -281,21 +282,43 @@ let currentDate = (() => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 })();
-let cachedProducts = [];
-let cachedChannels = [];
-let cachedMembers  = [];
+let cachedProducts      = [];
+let cachedChannels      = [];
+let cachedMembers       = [];
+let cachedCategories    = [];
+let cachedSubcategories = [];
 
 async function initData() {
   try {
-    [cachedProducts, cachedChannels, cachedMembers] = await Promise.all([
+    [cachedProducts, cachedChannels, cachedMembers, cachedCategories, cachedSubcategories] = await Promise.all([
       fetch(API+'/products').then(r=>r.json()),
       fetch(API+'/channels').then(r=>r.json()),
-      fetch(API+'/members').then(r=>r.json())
+      fetch(API+'/members').then(r=>r.json()),
+      fetch(API+'/categories').then(r=>r.json()).catch(()=>[]),
+      fetch(API+'/subcategories').then(r=>r.json()).catch(()=>[])
     ]);
   } catch(e) {
     showToast('APIサーバー未起動。python app.py を実行してください。', true);
   }
   showPage('plan');
+}
+
+// ハードコード値のフォールバック（マスタ未投入時の互換性のため）
+const FALLBACK_CATS = ['弁当','寿司','惣菜','その他'];
+const FALLBACK_SUBS = {'弁当':['白米','三色','ちらし','炊き込み'],
+                       '惣菜':['煮物','酢もの','サラダ','魚','天ぷら','漬物','和え物','揚げ物','その他']};
+function getCatOrder() {
+  return cachedCategories.length
+    ? cachedCategories.map(c=>c.name)
+    : FALLBACK_CATS;
+}
+function getSubcats(catName) {
+  if (cachedCategories.length) {
+    const cat = cachedCategories.find(c=>c.name===catName);
+    if (!cat) return [];
+    return cachedSubcategories.filter(s=>s.category_id===cat.id).map(s=>s.name);
+  }
+  return FALLBACK_SUBS[catName] || [];
 }
 
 async function init() {
@@ -320,10 +343,10 @@ function showPage(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',monthly:'月次サマリ',master:'商品マスタ',channels:'出荷先マスタ',members:'メンバーマスタ',adminplan:'週間予定数入力',adminmenu:'週間献立表',adminshifts:'週間シフト予定'};
+  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',monthly:'月次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:'出荷先マスタ',members:'メンバーマスタ',adminplan:'週間予定数入力',adminmenu:'週間献立表',adminshifts:'週間シフト予定'};
   document.getElementById('page-title').textContent = titles[page]||'';
   ({plan:renderPlanPage,actual:renderActualPage,report:renderReportPage,
-    menu:renderMenuPage,monthly:renderMonthlyPage,master:renderMasterPage,channels:renderChannelsPage,members:renderMembersPage,
+    menu:renderMenuPage,monthly:renderMonthlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,members:renderMembersPage,
     adminplan:renderAdminPlanPage,adminmenu:renderAdminMenuPage,adminshifts:renderAdminShiftsPage})[page]?.();
 }
 
@@ -388,7 +411,7 @@ async function renderPlanPage() {
   function buildDayMatrix(targetDate) {
     const chHeader = chs.map(ch=>`<th style="min-width:58px">${ch.name}</th>`).join('') + '<th style="min-width:52px;background:#E8F0E8">合計</th>';
 
-    const catOrder = ['弁当','寿司','惣菜','その他'];
+    const catOrder = getCatOrder();
     let body = '';
     catOrder.forEach(cat => {
       const catProds = prods.filter(p=>p.category===cat);
@@ -446,7 +469,7 @@ async function renderPlanPage() {
       }).join('')
     ).join('');
 
-    const catOrder = ['弁当','寿司','惣菜','その他'];
+    const catOrder = getCatOrder();
     let body = '';
     catOrder.forEach(cat => {
       const catProds = prods.filter(p=>p.category===cat);
@@ -689,7 +712,7 @@ async function renderActualPage() {
     chs.map(ch=>`<th style="min-width:96px;font-size:20px">${ch.name}</th>`).join('') +
     '<th style="min-width:72px;background:#E8F0E8;font-size:20px">合計</th>';
 
-  const catOrder = ['弁当','寿司','惣菜','その他'];
+  const catOrder = getCatOrder();
   let tableBody = '';
   catOrder.forEach(cat => {
     const catProds = activeProds.filter(p=>p.category===cat);
@@ -890,8 +913,14 @@ function addActualProductRow() {
       style="width:80px;font-size:20px;text-align:center;padding:4px 2px"
       oninput="updateActualTotals(this)">
   </td>`).join('');
+  const priceCell = `<td style="padding:3px 5px;background:#FFFDE7">
+    <input type="number" min="0" value="${prod.price}" data-pid="${pid}" class="unit-price"
+      title="本日の単価（マスタは変更されません）"
+      style="width:72px;font-size:18px;text-align:right;padding:4px 2px"
+      onchange="dirty=true">
+  </td>`;
   const newRow = document.createElement('tr');
-  newRow.innerHTML = `<td class="left" style="white-space:nowrap;font-weight:500;font-size:20px">${prod.name}</td>${cells}<td class="fw-bold" style="background:#F0F7F0;text-align:center" id="at_${pid}"></td>`;
+  newRow.innerHTML = `<td class="left" style="white-space:nowrap;font-weight:500;font-size:20px">${prod.name}</td>${priceCell}${cells}<td class="fw-bold" style="background:#F0F7F0;text-align:center" id="at_${pid}"></td>`;
   const tbody = document.querySelector('#actual-table tbody');
   const totalRow = tbody.querySelector('tr[data-total-row]');
   if (totalRow) tbody.insertBefore(newRow, totalRow);
@@ -1035,7 +1064,7 @@ async function renderReportPage() {
       prodInfo[d.product_id].price = Math.round(d.actual_amount / d.actual_qty);
     }
   });
-  const catOrder = ['弁当','寿司','惣菜','その他'];
+  const catOrder = getCatOrder();
   const allPids  = [...new Set(details.map(d=>d.product_id))];
   allPids.sort((a,b)=>{
     const ca=catOrder.indexOf(prodInfo[a].category), cb=catOrder.indexOf(prodInfo[b].category);
@@ -1175,13 +1204,7 @@ async function updateExpense(date) {
 // 週間献立
 // ═══════════════════════════════════════════════
 const MENU_CATS = ['メイン（煮物）','煮物①','煮物②','酢もの①','酢もの②','天ぷら','魚','サラダ①','サラダ②','漬物'];
-const SOUZAI_SUBCATS = ['煮物','酢もの','サラダ','魚','天ぷら','漬物','和え物','揚げ物','その他'];
-const BENTO_SUBCATS  = ['白米','三色','ちらし','炊き込み'];
-function getSubcats(cat) {
-  if (cat==='惣菜') return SOUZAI_SUBCATS;
-  if (cat==='弁当') return BENTO_SUBCATS;
-  return [];
-}
+// getSubcats / getCatOrder / cachedCategories はinitData近辺で定義済み
 const MENU_CAT_TO_SUBCAT = {
   'メイン（煮物）':'煮物','煮物①':'煮物','煮物②':'煮物',
   '酢もの①':'酢もの','酢もの②':'酢もの',
@@ -1398,7 +1421,7 @@ function buildProdRow(p) {
     <td class="left"><input type="text" value="${p.name}" id="pn${p.id}" style="width:150px"></td>
     <td><input type="number" value="${p.price}" id="pp${p.id}" style="width:75px"></td>
     <td><select id="pc${p.id}" style="width:70px" onchange="toggleSubcatCell(${p.id},this.value)">
-      ${['弁当','寿司','惣菜','その他'].map(c=>`<option${c===p.category?' selected':''}>${c}</option>`).join('')}
+      ${getCatOrder().map(c=>`<option${c===p.category?' selected':''}>${c}</option>`).join('')}
     </select></td>
     <td id="psc${p.id}">${subcatSel}</td>
     <td class="text-center">${statusBadge}</td>
@@ -1415,7 +1438,7 @@ async function renderMasterPage() {
   const activeCount   = prods.filter(p=>p.active!==0).length;
   const inactiveCount = prods.length - activeCount;
 
-  const catOrder = ['弁当','寿司','惣菜','その他'];
+  const catOrder = getCatOrder();
   let rows = '';
   catOrder.forEach(cat => {
     const catProds = prods.filter(p=>p.category===cat);
@@ -1468,18 +1491,13 @@ async function renderMasterPage() {
           <div class="form-group"><label>分類・種別</label>
             <select id="new-cat">
               <option value="">― 選択してください ―</option>
-              <optgroup label="弁当">
-                ${BENTO_SUBCATS.map(s=>`<option value="弁当|${s}">${s}</option>`).join('')}
-              </optgroup>
-              <optgroup label="寿司">
-                <option value="寿司|">寿司</option>
-              </optgroup>
-              <optgroup label="惣菜">
-                ${SOUZAI_SUBCATS.map(s=>`<option value="惣菜|${s}">${s}</option>`).join('')}
-              </optgroup>
-              <optgroup label="その他">
-                <option value="その他|">その他</option>
-              </optgroup>
+              ${getCatOrder().map(cat => {
+                const subs = getSubcats(cat);
+                if (subs.length) {
+                  return `<optgroup label="${cat}">${subs.map(s=>`<option value="${cat}|${s}">${s}</option>`).join('')}</optgroup>`;
+                }
+                return `<optgroup label="${cat}"><option value="${cat}|">${cat}</option></optgroup>`;
+              }).join('')}
             </select>
           </div>
         </div>
@@ -1541,6 +1559,149 @@ async function addProduct() {
     body:JSON.stringify({name,price,category,subcategory})}).then(r=>r.json()).catch(()=>null);
   if (r?.ok) { showToast('追加しました'); cachedProducts=await fetch(API+'/products').then(r=>r.json()); renderMasterPage(); }
   else showToast('追加失敗',true);
+}
+
+
+// ═══════════════════════════════════════════════
+// カテゴリマスタ
+// ═══════════════════════════════════════════════
+async function reloadCategoryCaches() {
+  [cachedCategories, cachedSubcategories] = await Promise.all([
+    fetch(API+'/categories').then(r=>r.json()).catch(()=>[]),
+    fetch(API+'/subcategories').then(r=>r.json()).catch(()=>[])
+  ]);
+}
+
+async function renderCategoriesPage() {
+  setLoading();
+  await reloadCategoryCaches();
+  const cats = cachedCategories;
+  const subs = cachedSubcategories;
+
+  const catRows = cats.map(c => {
+    const subRows = subs.filter(s=>s.category_id===c.id).map(s=>`
+      <tr>
+        <td style="padding-left:24px"><input type="text" value="${s.name}" id="sn${s.id}" style="width:140px"></td>
+        <td><input type="number" value="${s.sort_order}" id="so${s.id}" style="width:56px;text-align:center" min="1"></td>
+        <td>
+          <button class="btn btn-primary btn-sm" onclick="updateSubcategory(${s.id})">更新</button>
+          <button class="btn btn-secondary btn-sm" style="margin-left:4px;color:var(--danger)" onclick="deleteSubcategory(${s.id},'${s.name.replace(/'/g,"\\'")}')">削除</button>
+        </td>
+      </tr>`).join('');
+    return `
+      <tr style="background:var(--accent-light)">
+        <td><input type="text" value="${c.name}" id="cn${c.id}" style="width:140px;font-weight:600"></td>
+        <td><input type="number" value="${c.sort_order}" id="co${c.id}" style="width:56px;text-align:center" min="1"></td>
+        <td>
+          <button class="btn btn-primary btn-sm" onclick="updateCategory(${c.id})">更新</button>
+          <button class="btn btn-secondary btn-sm" style="margin-left:4px;color:var(--danger)" onclick="deleteCategory(${c.id},'${c.name.replace(/'/g,"\\'")}')">削除</button>
+        </td>
+      </tr>
+      ${subRows}
+      <tr>
+        <td colspan="3" style="padding:4px 4px 12px 24px;background:#FAFAFA">
+          <input type="text" id="newsn${c.id}" placeholder="新しいサブカテゴリ名" style="width:160px;font-size:13px">
+          <button class="btn btn-secondary btn-sm" style="margin-left:6px" onclick="addSubcategory(${c.id})">＋ サブカテゴリ追加</button>
+        </td>
+      </tr>`;
+  }).join('');
+
+  const catOptions = cats.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+
+  document.getElementById('content').innerHTML = `
+    <div class="alert alert-warn no-print" style="margin-bottom:16px">
+      ⚠️ カテゴリ名・サブカテゴリ名を変更すると、その名前を使用中の全商品も自動でリネームされます。<br>
+      使用中のカテゴリ／サブカテゴリは削除できません（先に商品を別カテゴリに移動してください）。
+    </div>
+    <div class="card mb-16">
+      <div class="card-header">
+        <span class="card-title">カテゴリ・サブカテゴリ一覧</span>
+        <span class="text-muted" style="font-size:12px">カテゴリ${cats.length}件 / サブカテゴリ${subs.length}件</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th style="text-align:left;min-width:160px">名前</th>
+            <th style="min-width:60px">ソート順</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${catRows||'<tr><td colspan="3" class="text-muted text-center" style="padding:20px">カテゴリが登録されていません</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">カテゴリを追加</span></div>
+      <div class="card-body">
+        <div class="form-grid" style="grid-template-columns:1fr auto;gap:12px;align-items:end">
+          <div class="form-group">
+            <label>カテゴリ名 <span style="color:var(--danger)">*</span></label>
+            <input type="text" id="new-cat" placeholder="例：パン">
+          </div>
+          <button class="btn btn-primary" onclick="addCategory()">＋ 追加</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function addCategory() {
+  const name = document.getElementById('new-cat').value.trim();
+  if (!name) { showToast('カテゴリ名を入力してください', true); return; }
+  const r = await fetch(`${API}/categories`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('追加しました'); renderCategoriesPage(); }
+  else showToast(r?.error || '追加失敗', true);
+}
+
+async function updateCategory(id) {
+  const name  = document.getElementById('cn'+id).value.trim();
+  const order = parseInt(document.getElementById('co'+id).value) || 1;
+  if (!name) { showToast('カテゴリ名を入力してください', true); return; }
+  const r = await fetch(`${API}/categories/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, sort_order: order, active: 1})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) {
+    showToast('更新しました');
+    await reloadCategoryCaches();
+    cachedProducts = await fetch(API+'/products').then(r=>r.json());
+    renderCategoriesPage();
+  } else showToast(r?.error || '更新失敗', true);
+}
+
+async function deleteCategory(id, name) {
+  if (!confirm(`カテゴリ「${name}」を削除しますか？\n配下のサブカテゴリも同時に削除されます。`)) return;
+  const r = await fetch(`${API}/categories/${id}`, {method:'DELETE'}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('削除しました'); renderCategoriesPage(); }
+  else showToast(r?.error || '削除失敗', true);
+}
+
+async function addSubcategory(catId) {
+  const name = document.getElementById('newsn'+catId).value.trim();
+  if (!name) { showToast('サブカテゴリ名を入力してください', true); return; }
+  const r = await fetch(`${API}/subcategories`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, category_id: catId})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('追加しました'); renderCategoriesPage(); }
+  else showToast(r?.error || '追加失敗', true);
+}
+
+async function updateSubcategory(id) {
+  const name  = document.getElementById('sn'+id).value.trim();
+  const order = parseInt(document.getElementById('so'+id).value) || 1;
+  if (!name) { showToast('サブカテゴリ名を入力してください', true); return; }
+  const r = await fetch(`${API}/subcategories/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, sort_order: order, active: 1})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) {
+    showToast('更新しました');
+    await reloadCategoryCaches();
+    cachedProducts = await fetch(API+'/products').then(r=>r.json());
+    renderCategoriesPage();
+  } else showToast(r?.error || '更新失敗', true);
+}
+
+async function deleteSubcategory(id, name) {
+  if (!confirm(`サブカテゴリ「${name}」を削除しますか？`)) return;
+  const r = await fetch(`${API}/subcategories/${id}`, {method:'DELETE'}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('削除しました'); renderCategoriesPage(); }
+  else showToast(r?.error || '削除失敗', true);
 }
 
 
