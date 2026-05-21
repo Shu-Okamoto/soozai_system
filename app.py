@@ -571,10 +571,16 @@ def print_shipping_plan():
 # ─── 注文弁当（bento app 連携）────────────────
 @app.route('/api/bento/orders', methods=['GET'])
 def get_bento_orders():
-    """明日以降の注文を取得（offices / members / products を JOIN）"""
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    """指定日(?date=YYYY-MM-DD)、または無指定なら明日以降の注文を取得"""
+    target_date = request.args.get('date')
     try:
-        orders = sb.table('orders').select('*').gte('delivery_date', tomorrow).order('delivery_date').order('created_at').execute().data
+        q = sb.table('orders').select('*')
+        if target_date:
+            q = q.eq('delivery_date', target_date)
+        else:
+            tomorrow = (date.today() + timedelta(days=1)).isoformat()
+            q = q.gte('delivery_date', tomorrow)
+        orders = q.order('delivery_date').order('created_at').execute().data
     except Exception as e:
         return jsonify({'error': f'orders取得失敗: {e}'}), 500
     if not orders:

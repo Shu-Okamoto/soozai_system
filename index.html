@@ -287,17 +287,16 @@ let cachedChannels      = [];
 let cachedMembers       = [];
 let cachedCategories    = [];
 let cachedSubcategories = [];
-let cachedBentoOrders   = [];
+let cachedBentoOrders   = []; // 表示中ページの日付分のみ
 
 async function initData() {
   try {
-    [cachedProducts, cachedChannels, cachedMembers, cachedCategories, cachedSubcategories, cachedBentoOrders] = await Promise.all([
+    [cachedProducts, cachedChannels, cachedMembers, cachedCategories, cachedSubcategories] = await Promise.all([
       fetch(API+'/products').then(r=>r.json()),
       fetch(API+'/channels').then(r=>r.json()),
       fetch(API+'/members').then(r=>r.json()),
       fetch(API+'/categories').then(r=>r.json()).catch(()=>[]),
-      fetch(API+'/subcategories').then(r=>r.json()).catch(()=>[]),
-      fetch(API+'/bento/orders').then(r=>r.json()).catch(()=>[])
+      fetch(API+'/subcategories').then(r=>r.json()).catch(()=>[])
     ]);
   } catch(e) {
     showToast('APIサーバー未起動。python app.py を実行してください。', true);
@@ -305,21 +304,15 @@ async function initData() {
   showPage('plan');
 }
 
+async function loadBentoOrders(targetDate) {
+  cachedBentoOrders = await fetch(`${API}/bento/orders?date=${targetDate}`).then(r=>r.json()).catch(()=>[]);
+  if (!Array.isArray(cachedBentoOrders)) cachedBentoOrders = [];
+}
+
 // 注文弁当の別表HTMLを返す（colspan指定）
 function buildBentoOrdersTable(colspan) {
   if (!Array.isArray(cachedBentoOrders) || !cachedBentoOrders.length) return '';
-  const dowJa = ['日','月','火','水','木','金','土'];
-  const fmtDate = d => {
-    const dt = new Date(d);
-    return `${d.slice(5).replace('-','/')}（${dowJa[dt.getDay()]}）`;
-  };
-  let lastDate = null;
-  const rows = cachedBentoOrders.map(o => {
-    const dateHeader = (o.delivery_date !== lastDate)
-      ? `<tr style="background:#FFF3E0"><td colspan="9" style="font-weight:700;padding:4px 8px;color:#E65100">📅 ${fmtDate(o.delivery_date)}</td></tr>`
-      : '';
-    lastDate = o.delivery_date;
-    return dateHeader + `<tr>
+  const rows = cachedBentoOrders.map(o => `<tr>
       <td>${o.office_name||''}</td>
       <td>${o.member_name||''}</td>
       <td>${o.product_name||''}</td>
@@ -329,11 +322,10 @@ function buildBentoOrdersTable(colspan) {
       <td></td>
       <td class="text-center">${o.payment_method||''}</td>
       <td>${o.note||''}</td>
-    </tr>`;
-  }).join('');
+    </tr>`).join('');
   const inner = `
     <div style="margin:8px 0;padding:8px;background:#FFF8E1;border:1px solid #FFB300;border-radius:6px">
-      <div style="font-weight:700;color:#E65100;margin-bottom:4px">📋 注文弁当（明日以降）${cachedBentoOrders.length}件</div>
+      <div style="font-weight:700;color:#E65100;margin-bottom:4px">📋 注文弁当 ${cachedBentoOrders.length}件</div>
       <table style="width:100%;font-size:13px;background:white">
         <thead><tr style="background:#FFE0B2">
           <th style="text-align:left;padding:4px 6px">店舗</th>
@@ -442,6 +434,7 @@ async function renderPlanPage() {
   const todayLabel = todayDate.slice(5).replace('-','/');
 
   const plans = await fetch(`${API}/shipping-plans?date_from=${days[0]}&date_to=${days[5]}`).then(r=>r.json()).catch(()=>[]);
+  await loadBentoOrders(todayDate);
 
   // planMap[date][product_id][channel_id] = qty
   const planMap = {};
@@ -732,6 +725,7 @@ async function renderActualPage() {
     fetch(`${API}/weekly-menus?week_start=${mondayStr}`).then(r=>r.json()).catch(()=>[]),
     fetch(`${API}/daily-reports/${date}`).then(r=>r.json()).catch(()=>null)
   ]);
+  await loadBentoOrders(date);
 
   // 当日の献立から商品IDを取得
   const dow = new Date(date).getDay() || 7; // 日=7(対象外), 月=1〜土=6
@@ -1091,6 +1085,7 @@ async function renderReportPage() {
   setLoading();
   const date = currentDate;
   const r = await fetch(`${API}/daily-reports/${date}`).then(res=>res.json()).catch(()=>null);
+  await loadBentoOrders(date);
 
   if (!r || !r.total_sales) {
     document.getElementById('content').innerHTML = `
