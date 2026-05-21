@@ -259,10 +259,17 @@ def get_shipping_plans():
 @app.route('/api/shipping-plans/bulk', methods=['POST'])
 def bulk_save_plans():
     items = request.json
-    rows  = [{'date':d['date'],'product_id':d['product_id'],'channel_id':d['channel_id'],'planned_qty':d['planned_qty'],'note':d.get('note','')} for d in items]
+    # スパース化：送信日付の既存行を一度全削除し、planned_qty>0 のみ再挿入する。
+    # これによりクリアされたセルがDBに残らず、Supabase の暗黙1000行制限に当たらない。
+    dates = list({d['date'] for d in items})
+    for date in dates:
+        sb.table('hq_shipping_plans').delete().eq('date',date).execute()
+    rows = [{'date':d['date'],'product_id':d['product_id'],'channel_id':d['channel_id'],
+             'planned_qty':d['planned_qty'],'note':d.get('note','')}
+            for d in items if d['planned_qty'] > 0]
     if rows:
-        sb.table('hq_shipping_plans').upsert(rows, on_conflict='date,product_id,channel_id').execute()
-    return jsonify({'ok': True, 'count': len(items)})
+        sb.table('hq_shipping_plans').insert(rows).execute()
+    return jsonify({'ok': True, 'count': len(rows)})
 
 @app.route('/api/shipping-plans/week-copy', methods=['POST'])
 def copy_week_plan():
