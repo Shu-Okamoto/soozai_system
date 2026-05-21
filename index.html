@@ -436,6 +436,9 @@ async function renderPlanPage() {
 
   const plans = await fetch(`${API}/shipping-plans?date_from=${days[0]}&date_to=${days[5]}`).then(r=>r.json()).catch(()=>[]);
   await loadBentoOrders(todayDate);
+  // dx 連携：店頭注文（読み取り専用で 弁当 カテゴリ末尾に表示）
+  const instoreOrders = await fetch(`${API}/instore/orders?date=${todayDate}`).then(r=>r.json()).catch(()=>[]);
+  const instoreOrdersList = Array.isArray(instoreOrders) ? instoreOrders : [];
 
   // planMap[date][product_id][channel_id] = qty
   const planMap = {};
@@ -474,15 +477,32 @@ async function renderPlanPage() {
           <td class="fw-bold" style="background:#F0F7F0" id="rt_${p.id}_${targetDate}">${rowTotal||''}</td>
         </tr>`;
       });
-      if (cat === '弁当') body += buildBentoOrdersTable(planColspan);
+      if (cat === '弁当') {
+        // dx 由来の店頭注文を 弁当 末尾に read-only 行で表示
+        instoreOrdersList.forEach(o => {
+          const cells = chs.map(ch => {
+            const qty = (o.store_id === ch.id) ? (o.quantity || 0) : '';
+            return `<td class="text-center" style="color:var(--text2);background:#FFF8E1">${qty || ''}</td>`;
+          }).join('');
+          body += `<tr style="background:#FFFDE7">
+            <td class="left" style="white-space:nowrap;color:#E65100">【注文】${o.product_name}（${o.customer_name||''}）</td>
+            <td style="color:var(--text3);font-size:16px;white-space:nowrap">¥${(o.price||0).toLocaleString()}</td>
+            ${cells}
+            <td class="fw-bold" style="background:#F0F7F0">${o.quantity||''}</td>
+          </tr>`;
+        });
+        body += buildBentoOrdersTable(planColspan);
+      }
     });
 
-    // 列合計行
+    // 列合計行（dx 注文も加算）
+    const instoreColSum = ch => instoreOrdersList.filter(o=>o.store_id===ch.id).reduce((s,o)=>s+(o.quantity||0),0);
     const colTotals = chs.map(ch=>{
-      const t = prods.reduce((s,p)=>s+(planMap[targetDate]?.[p.id]?.[ch.id]||0),0);
+      const t = prods.reduce((s,p)=>s+(planMap[targetDate]?.[p.id]?.[ch.id]||0),0) + instoreColSum(ch);
       return `<td class="fw-bold" style="background:#E8F0E8" id="ct_${ch.id}_${targetDate}">${t||''}</td>`;
     }).join('');
-    const grandTotal = chs.reduce((s,ch)=>s+prods.reduce((ss,p)=>ss+(planMap[targetDate]?.[p.id]?.[ch.id]||0),0),0);
+    const grandTotal = chs.reduce((s,ch)=>s+prods.reduce((ss,p)=>ss+(planMap[targetDate]?.[p.id]?.[ch.id]||0),0),0)
+                     + instoreOrdersList.reduce((s,o)=>s+(o.quantity||0),0);
     body += `<tr style="background:var(--surface2)">
       <td class="fw-bold left" colspan="2" style="font-size:12px">合　計</td>
       ${colTotals}
