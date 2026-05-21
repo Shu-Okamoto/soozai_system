@@ -333,10 +333,15 @@ def bulk_save_actuals():
     def price_of(d):
         up = d.get('unit_price')
         return up if up is not None and up != '' else prods.get(d['product_id'], 0)
-    rows  = [{'date':d['date'],'product_id':d['product_id'],'channel_id':d['channel_id'],
-              'actual_qty':d['actual_qty'],'actual_amount':d['actual_qty']*price_of(d)} for d in items]
+    # スパース化：送信日付の既存行を一度削除し、actual_qty>0 の行だけ再挿入する。
+    dates = list({d['date'] for d in items})
+    for date in dates:
+        sb.table('hq_shipping_actuals').delete().eq('date',date).execute()
+    rows = [{'date':d['date'],'product_id':d['product_id'],'channel_id':d['channel_id'],
+             'actual_qty':d['actual_qty'],'actual_amount':d['actual_qty']*price_of(d)}
+            for d in items if d['actual_qty'] > 0]
     if rows:
-        sb.table('hq_shipping_actuals').upsert(rows, on_conflict='date,product_id,channel_id').execute()
+        sb.table('hq_shipping_actuals').insert(rows).execute()
 
     # 既存日報があれば自動で再生成（カード値・月次集計を実績と一致させる）
     dates = {d['date'] for d in items}
