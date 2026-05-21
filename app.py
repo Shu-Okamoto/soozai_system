@@ -258,10 +258,15 @@ def get_shipping_plans():
 
 @app.route('/api/shipping-plans/bulk', methods=['POST'])
 def bulk_save_plans():
-    items = request.json
+    payload = request.json
+    # 新フォーマット {dates, items} と旧フォーマット [items] の両対応
+    if isinstance(payload, list):
+        items = payload
+        dates = list({d['date'] for d in items})
+    else:
+        items = payload.get('items', [])
+        dates = payload.get('dates') or list({d['date'] for d in items})
     # スパース化：送信日付の既存行を一度全削除し、planned_qty>0 のみ再挿入する。
-    # これによりクリアされたセルがDBに残らず、Supabase の暗黙1000行制限に当たらない。
-    dates = list({d['date'] for d in items})
     for date in dates:
         sb.table('hq_shipping_plans').delete().eq('date',date).execute()
     rows = [{'date':d['date'],'product_id':d['product_id'],'channel_id':d['channel_id'],
@@ -327,14 +332,20 @@ def init_actuals_from_plan():
 
 @app.route('/api/shipping-actuals/bulk', methods=['POST'])
 def bulk_save_actuals():
-    items = request.json
+    payload = request.json
+    # 新フォーマット {dates, items} と旧フォーマット [items] の両対応
+    if isinstance(payload, list):
+        items = payload
+        dates = list({d['date'] for d in items})
+    else:
+        items = payload.get('items', [])
+        dates = payload.get('dates') or list({d['date'] for d in items})
     pids  = list({d['product_id'] for d in items})
     prods = {p['id']:p['price'] for p in sb.table('hq_products').select('id,price').in_('id',pids).execute().data} if pids else {}
     def price_of(d):
         up = d.get('unit_price')
         return up if up is not None and up != '' else prods.get(d['product_id'], 0)
     # スパース化：送信日付の既存行を一度削除し、actual_qty>0 の行だけ再挿入する。
-    dates = list({d['date'] for d in items})
     for date in dates:
         sb.table('hq_shipping_actuals').delete().eq('date',date).execute()
     rows = [{'date':d['date'],'product_id':d['product_id'],'channel_id':d['channel_id'],
@@ -344,7 +355,7 @@ def bulk_save_actuals():
         sb.table('hq_shipping_actuals').insert(rows).execute()
 
     # 既存日報があれば自動で再生成（カード値・月次集計を実績と一致させる）
-    dates = {d['date'] for d in items}
+    # dates は payload からの明示的リストを使う（全クリア時にも sync を効かせるため）
     sync_keys = ['total_sales','material_cost','labor_cost','expense','profit','labor_productivity',
                  'total_hours','west_sales','south_sales','other_sales','separate_orders']
     for date in dates:

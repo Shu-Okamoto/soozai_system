@@ -685,10 +685,14 @@ let dirty = false;
 async function savePlans() {
   const inputs = document.querySelectorAll('#plan-table input[type="number"]');
   const items = [];
+  const dateSet = new Set();
   inputs.forEach(inp => {
-    items.push({date:inp.dataset.date, product_id:+inp.dataset.pid, channel_id:+inp.dataset.cid, planned_qty:parseInt(inp.value)||0});
+    dateSet.add(inp.dataset.date);
+    const v = parseInt(inp.value) || 0;
+    if (v > 0) items.push({date:inp.dataset.date, product_id:+inp.dataset.pid, channel_id:+inp.dataset.cid, planned_qty:v});
   });
-  const r = await fetch(`${API}/shipping-plans/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(items)}).then(r=>r.json()).catch(()=>null);
+  const r = await fetch(`${API}/shipping-plans/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({dates:[...dateSet], items})}).then(r=>r.json()).catch(()=>null);
   if (r?.ok) { showToast(`${items.length}件保存しました`); dirty=false; }
   else showToast('保存失敗',true);
 }
@@ -1045,8 +1049,9 @@ async function saveActuals(date) {
   });
   const actualItems = [];
   document.querySelectorAll('table input[type="number"][data-pid][data-cid]').forEach(inp => {
-    actualItems.push({date, product_id:+inp.dataset.pid, channel_id:+inp.dataset.cid,
-      actual_qty:parseInt(inp.value)||0, unit_price:priceMap[inp.dataset.pid]});
+    const v = parseInt(inp.value)||0;
+    if (v > 0) actualItems.push({date, product_id:+inp.dataset.pid, channel_id:+inp.dataset.cid,
+      actual_qty:v, unit_price:priceMap[inp.dataset.pid]});
   });
   const shiftItems = [];
   document.querySelectorAll('.shift-hr').forEach(inp => {
@@ -1056,7 +1061,8 @@ async function saveActuals(date) {
   const weather = document.getElementById('inp-weather')?.value || '';
   const note    = document.getElementById('inp-note')?.value || '';
   await Promise.all([
-    fetch(`${API}/shipping-actuals/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(actualItems)}).then(r=>r.json()),
+    fetch(`${API}/shipping-actuals/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({dates:[date], items:actualItems})}).then(r=>r.json()),
     fetch(`${API}/shifts`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({date,shifts:shiftItems})}).then(r=>r.json()),
     fetch(`${API}/daily-info/${date}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({weather,note})}).then(r=>r.json()),
   ]);
