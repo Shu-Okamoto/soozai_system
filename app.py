@@ -269,7 +269,9 @@ def copy_week_plan():
     d         = request.json
     src_from  = d['src_from']; src_to = d['src_to']; dst_from = d['dst_from']
     diff      = (datetime.strptime(dst_from,'%Y-%m-%d') - datetime.strptime(src_from,'%Y-%m-%d')).days
-    rows      = sb.table('hq_shipping_plans').select('*').gte('date',src_from).lte('date',src_to).execute().data
+    # planned_qty=0 の行（=空欄として保存された行）はコピー対象外にする
+    # （コピー時に今週入力済みの値をゼロで上書きしてしまうため）
+    rows      = sb.table('hq_shipping_plans').select('*').gte('date',src_from).lte('date',src_to).gt('planned_qty',0).execute().data
     new_rows  = [{'date':(datetime.strptime(r['date'],'%Y-%m-%d')+timedelta(days=diff)).strftime('%Y-%m-%d'),
                   'product_id':r['product_id'],'channel_id':r['channel_id'],'planned_qty':r['planned_qty']} for r in rows]
     if new_rows:
