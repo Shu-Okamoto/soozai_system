@@ -148,7 +148,6 @@
       <div class="nav-label">週次・月次</div>
       <button class="nav-item" onclick="showPage('menu')"    id="nav-menu">🍱 週間献立</button>
       <button class="nav-item" onclick="showPage('monthly')" id="nav-monthly">📈 月次サマリ</button>
-      <button class="nav-item" onclick="showPage('yearly')"  id="nav-yearly">📈 年次サマリ</button>
     </div>
     <div class="nav-group admin-only">
       <div class="nav-label">管理者</div>
@@ -385,10 +384,10 @@ function showPage(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:'出荷先マスタ',members:'メンバーマスタ',adminplan:'週間予定数入力',adminmenu:'週間献立表',adminshifts:'週間シフト予定'};
+  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',monthly:'月次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:'出荷先マスタ',members:'メンバーマスタ',adminplan:'週間予定数入力',adminmenu:'週間献立表',adminshifts:'週間シフト予定'};
   document.getElementById('page-title').textContent = titles[page]||'';
   ({plan:renderPlanPage,actual:renderActualPage,report:renderReportPage,
-    menu:renderMenuPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,members:renderMembersPage,
+    menu:renderMenuPage,monthly:renderMonthlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,members:renderMembersPage,
     adminplan:renderAdminPlanPage,adminmenu:renderAdminMenuPage,adminshifts:renderAdminShiftsPage})[page]?.();
 }
 
@@ -821,16 +820,10 @@ async function renderActualPage() {
     .map(m=>`<option value="${m.name}" data-wage="${m.hourly_wage}" data-planned="0">${m.name}</option>`)
     .join('');
 
-  const isFinalized = !!savedInfo?.finalized_at;
-  const finalizedBanner = isFinalized
-    ? `<div class="alert" style="background:#E8F5E9;border:1px solid #43A047;color:#2E7D32;padding:8px 14px;border-radius:6px;margin-bottom:10px;font-weight:700">🔒 ${date} は確定済みです。天気・メモのみ変更できます。</div>`
-    : '';
-
   document.getElementById('content').innerHTML = `
-    ${finalizedBanner}
     <div class="no-print btn-group mb-16">
-      <button class="btn btn-primary" onclick="saveActuals('${date}')" ${isFinalized?'disabled title="確定済みのため変更不可"':''}>💾 実績・シフトを保存</button>
-      <button class="btn btn-warn"    onclick="generateReport('${date}')" ${isFinalized?'disabled title="確定済みのため再生成不可"':''}>📊 日報を生成する</button>
+      <button class="btn btn-primary" onclick="saveActuals('${date}')">💾 実績・シフトを保存</button>
+      <button class="btn btn-warn"    onclick="generateReport('${date}')">📊 日報を生成する</button>
       <div style="background:#FFF9C4;border:1px solid #F9A825;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
         🍚 炊飯量：<span id="rice-calc">―</span>
       </div>
@@ -914,13 +907,6 @@ async function renderActualPage() {
     </div>
   `;
   updateRiceCalc();
-
-  if (isFinalized) {
-    // 確定済み：実績数量・単価・シフト入力をロック（天気・メモは触れる）
-    document.querySelectorAll('#actual-table input').forEach(el=>el.disabled=true);
-    document.querySelectorAll('#shift-list input, #member-select, #add-prod-select').forEach(el=>el.disabled=true);
-    document.querySelectorAll('#shift-list button, .card-header button.btn-secondary.btn-sm').forEach(el=>el.disabled=true);
-  }
 }
 
 // マトリクス実績：行合計・列合計をリアルタイム更新
@@ -1188,17 +1174,10 @@ async function renderReportPage() {
   const shiftRows = (r.shifts||[]).map(s=>`
     <tr><td class="left">${s.member_name}</td><td class="text-right">${s.hours}h</td></tr>`).join('');
 
-  const finalized = !!r.finalized_at;
-  const finalizedAtLabel = finalized ? new Date(r.finalized_at).toLocaleString('ja-JP') : '';
-  const finalizeBtn = finalized
-    ? `<span style="background:#E8F5E9;border:1px solid #43A047;color:#2E7D32;border-radius:6px;padding:4px 10px;font-size:13px;font-weight:700">🔒 確定済 ${finalizedAtLabel}</span>`
-    : `<button class="btn btn-warn btn-sm" onclick="finalizeReport('${date}')">🔒 日報を確定する</button>`;
-
   document.getElementById('content').innerHTML = `
     <div class="print-header"><h2>惣菜部 売上日報</h2><p>${date}（${dayLabel}）　天気：${r.weather||'―'}</p></div>
     <div class="no-print btn-group mb-16">
       <button class="btn btn-secondary btn-sm" onclick="showPage('actual')">← 実績入力</button>
-      ${finalizeBtn}
       <div style="margin-left:auto"><button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 印刷</button></div>
     </div>
 
@@ -1252,7 +1231,7 @@ async function renderReportPage() {
       </div>` : ''}
     </div>
 
-    ${finalized ? '' : `<div class="card no-print">
+    <div class="card no-print">
       <div class="card-header"><span class="card-title">経費を修正して再計算</span></div>
       <div class="card-body">
         <div class="flex gap-12 items-center">
@@ -1263,22 +1242,8 @@ async function renderReportPage() {
           <button class="btn btn-primary btn-sm" style="margin-top:16px" onclick="updateExpense('${date}')">更新・再計算</button>
         </div>
       </div>
-    </div>`}
+    </div>
   `;
-}
-
-async function finalizeReport(date) {
-  if (!confirm(`${date} の日報を確定しますか？\n確定後は数値・明細の変更ができなくなります（天気・メモは変更可）。`)) return;
-  const res = await fetch(`${API}/daily-reports/${date}/finalize`,{method:'POST'});
-  if (res.ok) {
-    showToast('日報を確定しました');
-    renderReportPage();
-  } else if (res.status === 409) {
-    showToast('既に確定済みです', true);
-    renderReportPage();
-  } else {
-    showToast('確定に失敗しました', true);
-  }
 }
 
 async function updateExpense(date) {
@@ -1483,84 +1448,6 @@ async function renderMonthlyPage() {
             <td class="text-right ${s.total_profit>=0?'text-green':'text-danger'}">${fmt(s.total_profit)}</td>
             <td class="text-right">${fmt(s.avg_labor_prod)}</td>
             <td class="text-right">―</td>
-          </tr></tfoot>
-        </table>
-      </div>
-    </div>
-  `;
-}
-
-// ═══════════════════════════════════════════════
-// 年次サマリ
-// ═══════════════════════════════════════════════
-async function renderYearlyPage() {
-  setLoading();
-  const year = currentDate.slice(0,4);
-  const data = await fetch(`${API}/yearly-summary?year=${year}`).then(r=>r.json()).catch(()=>null);
-  if (!data?.months?.length) {
-    document.getElementById('content').innerHTML = `
-      <div class="no-print btn-group mb-16">
-        <input type="number" min="2020" max="2099" value="${year}" onchange="currentDate=this.value+'-01-01';document.getElementById('global-date').value=currentDate;renderYearlyPage()" style="width:100px;font-size:13px">
-      </div>
-      <div class="alert alert-warn">${year}年 のデータがありません。</div>`;
-    return;
-  }
-  const s = data.summary;
-  const monthLabel = m => `${m.slice(5)}月`;
-  const monthRows = data.months.map(m => `<tr>
-      <td>${monthLabel(m.month)}</td>
-      <td class="text-right">${m.op_days}</td>
-      <td class="text-right">${fmt(m.total_sales)}</td>
-      <td class="text-right">${fmt(m.west_sales)}</td>
-      <td class="text-right">${fmt(m.south_sales)}</td>
-      <td class="text-right">${fmt(m.other_sales)}</td>
-      <td class="text-right">${fmt(m.total_labor)}</td>
-      <td class="text-right ${m.total_profit>=0?'text-green':'text-danger'}">${fmt(m.total_profit)}</td>
-      <td class="text-right">${m.profit_rate}%</td>
-      <td class="text-right">${fmt(m.avg_labor_prod)}</td>
-    </tr>`).join('');
-
-  document.getElementById('content').innerHTML = `
-    <div class="print-header"><h2>惣菜部 年次サマリ</h2><p>${year}年</p></div>
-    <div class="no-print btn-group mb-16">
-      <input type="number" min="2020" max="2099" value="${year}" onchange="currentDate=this.value+'-01-01';document.getElementById('global-date').value=currentDate;renderYearlyPage()" style="width:100px;font-size:13px">
-      <div style="margin-left:auto"><button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 印刷</button></div>
-    </div>
-
-    <div class="kpi-grid">
-      <div class="kpi"><div class="kpi-label">年間売上</div><div class="kpi-value green">${fmt(s.total_sales)}</div><div class="kpi-sub">円</div></div>
-      <div class="kpi"><div class="kpi-label">年間利益</div><div class="kpi-value ${s.total_profit>=0?'green':'red'}">${fmt(s.total_profit)}</div><div class="kpi-sub">円　利益率 ${s.profit_rate}%</div></div>
-      <div class="kpi"><div class="kpi-label">人件費計</div><div class="kpi-value warn">${fmt(s.total_labor)}</div><div class="kpi-sub">円　人件費率 ${s.labor_rate}%</div></div>
-      <div class="kpi"><div class="kpi-label">営業日数</div><div class="kpi-value">${s.op_days}</div><div class="kpi-sub">日</div></div>
-      <div class="kpi"><div class="kpi-label">日平均売上</div><div class="kpi-value">${fmt(s.avg_daily_sales)}</div><div class="kpi-sub">円</div></div>
-      <div class="kpi"><div class="kpi-label">人時売平均</div><div class="kpi-value">${fmt(s.avg_labor_prod)}</div><div class="kpi-sub">円/時</div></div>
-    </div>
-    <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
-      <div class="kpi"><div class="kpi-label">西店売上</div><div class="kpi-value">${fmt(s.west_sales)}</div><div class="kpi-sub">円</div></div>
-      <div class="kpi"><div class="kpi-label">南店売上</div><div class="kpi-value">${fmt(s.south_sales)}</div><div class="kpi-sub">円</div></div>
-      <div class="kpi"><div class="kpi-label">その他</div><div class="kpi-value">${fmt(s.other_sales)}</div><div class="kpi-sub">円</div></div>
-    </div>
-
-    <div class="card">
-      <div class="card-header"><span class="card-title">月別明細</span></div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>月</th><th>営業日</th><th>売上</th><th>西店</th><th>南店</th><th>その他</th>
-            <th>人件費</th><th>利益</th><th>利益率</th><th>人時売</th>
-          </tr></thead>
-          <tbody>${monthRows}</tbody>
-          <tfoot><tr class="fw-bold" style="background:var(--surface2)">
-            <td class="left">合計</td>
-            <td class="text-right">${s.op_days}</td>
-            <td class="text-right">${fmt(s.total_sales)}</td>
-            <td class="text-right">${fmt(s.west_sales)}</td>
-            <td class="text-right">${fmt(s.south_sales)}</td>
-            <td class="text-right">${fmt(s.other_sales)}</td>
-            <td class="text-right">${fmt(s.total_labor)}</td>
-            <td class="text-right ${s.total_profit>=0?'text-green':'text-danger'}">${fmt(s.total_profit)}</td>
-            <td class="text-right">${s.profit_rate}%</td>
-            <td class="text-right">${fmt(s.avg_labor_prod)}</td>
           </tr></tfoot>
         </table>
       </div>

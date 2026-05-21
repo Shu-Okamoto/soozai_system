@@ -70,19 +70,8 @@ CREATE TABLE IF NOT EXISTS hq_daily_reports (
     south_sales        INTEGER DEFAULT 0,
     other_sales        INTEGER DEFAULT 0,
     note               TEXT DEFAULT '',
-    actuals_snapshot   JSONB,
-    shifts_snapshot    JSONB,
-    channels_snapshot  JSONB,
-    finalized_at       TIMESTAMPTZ,
     updated_at         TIMESTAMPTZ DEFAULT NOW()
 );
--- 既存テーブルへの追加（再実行安全）
-ALTER TABLE hq_daily_reports ADD COLUMN IF NOT EXISTS actuals_snapshot  JSONB;
-ALTER TABLE hq_daily_reports ADD COLUMN IF NOT EXISTS shifts_snapshot   JSONB;
-ALTER TABLE hq_daily_reports ADD COLUMN IF NOT EXISTS channels_snapshot JSONB;
-ALTER TABLE hq_daily_reports ADD COLUMN IF NOT EXISTS finalized_at      TIMESTAMPTZ;
-CREATE INDEX IF NOT EXISTS hq_daily_reports_finalized_idx
-    ON hq_daily_reports (finalized_at) WHERE finalized_at IS NULL;
 CREATE TABLE IF NOT EXISTS hq_members (
     id          BIGSERIAL PRIMARY KEY,
     name        TEXT UNIQUE NOT NULL,

@@ -8,10 +8,3 @@ services:
       name: sozai-db
       mountPath: /data
       sizeGB: 1
-
-  - type: cron
-    name: finalize-daily-reports
-    env: python
-    schedule: "0 18 * * *"   # 03:00 JST = 18:00 UTC (毎日)
-    buildCommand: pip install -r requirements.txt
-    startCommand: python finalize_pending.py

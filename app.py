@@ -2,14 +2,8 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from supabase import create_client
 import os, calendar, math
-from datetime import date, timedelta, datetime, timezone
+from datetime import date, timedelta, datetime
 from dotenv import load_dotenv
-
-JST = timezone(timedelta(hours=9))
-def today_jst():
-    return datetime.now(JST).date()
-def now_jst_iso():
-    return datetime.now(JST).isoformat()
 
 load_dotenv()
 
@@ -362,12 +356,11 @@ def bulk_save_actuals():
 
     # 既存日報があれば自動で再生成（カード値・月次集計を実績と一致させる）
     # dates は payload からの明示的リストを使う（全クリア時にも sync を効かせるため）
-    # ただし確定済み（finalized_at IS NOT NULL）は上書きしない
     sync_keys = ['total_sales','material_cost','labor_cost','expense','profit','labor_productivity',
                  'total_hours','west_sales','south_sales','other_sales','separate_orders']
     for date in dates:
-        stored = sb.table('hq_daily_reports').select('expense,finalized_at').eq('date',date).execute().data
-        if not stored or stored[0].get('finalized_at'):
+        stored = sb.table('hq_daily_reports').select('expense').eq('date',date).execute().data
+        if not stored:
             continue
         calc = calc_daily_report(date, expense_override=stored[0].get('expense'))
         sb.table('hq_daily_reports').update({k:calc[k] for k in sync_keys}).eq('date',date).execute()
@@ -408,9 +401,8 @@ def save_shifts():
         sb.table('hq_shifts').insert(rows).execute()
 
     # 既存日報があれば自動で再生成（人件費・利益・人時売を実績と一致させる）
-    # 確定済みは上書きしない
-    stored = sb.table('hq_daily_reports').select('expense,finalized_at').eq('date',date).execute().data
-    if stored and not stored[0].get('finalized_at'):
+    stored = sb.table('hq_daily_reports').select('expense').eq('date',date).execute().data
+    if stored:
         calc = calc_daily_report(date, expense_override=stored[0].get('expense'))
         sync_keys = ['total_sales','material_cost','labor_cost','expense','profit','labor_productivity',
                      'total_hours','west_sales','south_sales','other_sales','separate_orders']
@@ -492,10 +484,23 @@ def calc_daily_report(target_date, expense_override=None):
             'total_hours':total_hours,'west_sales':west,'south_sales':south,'other_sales':other,
             'separate_orders':separate_orders}
 
-def build_snapshot(date_str):
-    """date_str の actuals_detail / shifts / channels を現在のマスタで組み立てて返す"""
-    active_chs  = sb.table('hq_channels').select('*').eq('active',1).order('sort_order').execute().data
-    active_cids = {c['id'] for c in active_chs}
+@app.route('/api/daily-reports/<date_str>', methods=['GET'])
+def get_daily_report(date_str):
+    stored = sb.table('hq_daily_reports').select('*').eq('date',date_str).execute().data
+    # 常に最新の集計を再計算（出荷先のactive化など状態変化に追従させるため）
+    calc   = calc_daily_report(date_str, expense_override=stored[0].get('expense') if stored else None)
+    if stored:
+        result = {**stored[0], **calc}
+        # 保存済みとズレていれば月次サマリのために遅延更新
+        sync_keys = ['total_sales','material_cost','labor_cost','profit','labor_productivity',
+                     'total_hours','west_sales','south_sales','other_sales','separate_orders']
+        if any(stored[0].get(k) != calc.get(k) for k in sync_keys):
+            sb.table('hq_daily_reports').update({k:calc[k] for k in sync_keys}).eq('date',date_str).execute()
+    else:
+        result = calc
+
+    active_chs    = sb.table('hq_channels').select('*').eq('active',1).order('sort_order').execute().data
+    active_cids   = {c['id'] for c in active_chs}
     actuals = sb.table('hq_shipping_actuals').select('*').eq('date',date_str).gt('actual_qty',0).execute().data
     actuals = [a for a in actuals if a['channel_id'] in active_cids]
     if actuals:
@@ -509,99 +514,20 @@ def build_snapshot(date_str):
                         'channel_name':ch.get('name',''),'sort_order':ch.get('sort_order',0)})
             detail.append(row)
         detail.sort(key=lambda x:(x.get('category',''),x.get('product_id',0),x.get('sort_order',0)))
+        result['actuals_detail'] = detail
     else:
-        detail = []
-    shifts = sb.table('hq_shifts').select('*').eq('date',date_str).order('member_name').execute().data
-    return {'actuals_detail':detail,'shifts':shifts,'channels':active_chs}
+        result['actuals_detail'] = []
 
-def finalize_report(date_str):
-    """date_str の日報を確定する。既に確定済みなら False。"""
-    stored = sb.table('hq_daily_reports').select('expense,weather,note,finalized_at').eq('date',date_str).execute().data
-    if stored and stored[0].get('finalized_at'):
-        return False
-    expense_override = stored[0].get('expense') if stored else None
-    calc = calc_daily_report(date_str, expense_override=expense_override)
-    snap = build_snapshot(date_str)
-    data = {
-        'date': date_str,
-        'weather': stored[0].get('weather','') if stored else '',
-        'note':    stored[0].get('note','')    if stored else '',
-        **{k: calc[k] for k in ('total_sales','material_cost','labor_cost','expense','profit',
-                                'labor_productivity','total_hours','west_sales','south_sales',
-                                'other_sales','separate_orders')},
-        'actuals_snapshot':  snap['actuals_detail'],
-        'shifts_snapshot':   snap['shifts'],
-        'channels_snapshot': snap['channels'],
-        'finalized_at':      now_jst_iso(),
-    }
-    sb.table('hq_daily_reports').upsert(data, on_conflict='date').execute()
-    return True
-
-@app.route('/api/daily-reports/<date_str>', methods=['GET'])
-def get_daily_report(date_str):
-    stored_rows = sb.table('hq_daily_reports').select('*').eq('date',date_str).execute().data
-    stored = stored_rows[0] if stored_rows else None
-
-    # 確定済み → snapshot をそのまま返す（再計算しない）
-    if stored and stored.get('finalized_at'):
-        result = dict(stored)
-        result['actuals_detail'] = stored.get('actuals_snapshot')  or []
-        result['shifts']         = stored.get('shifts_snapshot')   or []
-        result['channels']       = stored.get('channels_snapshot') or []
-        return jsonify(result)
-
-    # 過去日かつ未確定 → 即時確定（遅延確定）してから再読込
-    if date_str < today_jst().isoformat():
-        finalize_report(date_str)
-        return get_daily_report(date_str)
-
-    # 当日以降 → 従来通り再計算
-    calc = calc_daily_report(date_str, expense_override=stored.get('expense') if stored else None)
-    if stored:
-        result = {**stored, **calc}
-        sync_keys = ['total_sales','material_cost','labor_cost','profit','labor_productivity',
-                     'total_hours','west_sales','south_sales','other_sales','separate_orders']
-        if any(stored.get(k) != calc.get(k) for k in sync_keys):
-            sb.table('hq_daily_reports').update({k:calc[k] for k in sync_keys}).eq('date',date_str).execute()
-    else:
-        result = calc
-
-    snap = build_snapshot(date_str)
-    result['actuals_detail'] = snap['actuals_detail']
-    result['channels']       = snap['channels']
-    result['shifts']         = snap['shifts']
+    result['channels'] = active_chs
+    result['shifts']   = sb.table('hq_shifts').select('*').eq('date',date_str).order('member_name').execute().data
     return jsonify(result)
-
-@app.route('/api/daily-reports/<date_str>/finalize', methods=['POST'])
-def finalize_daily_report(date_str):
-    if finalize_report(date_str):
-        return jsonify({'ok': True, 'finalized_at': now_jst_iso()})
-    return jsonify({'ok': False, 'error': 'already finalized'}), 409
-
-@app.route('/api/admin/finalize-pending', methods=['POST'])
-def finalize_pending():
-    """過去日かつ未確定の日報を一括で確定する（cron用）"""
-    secret = os.environ.get('CRON_SECRET','')
-    if secret and request.headers.get('X-Cron-Secret') != secret:
-        return jsonify({'error':'unauthorized'}), 401
-    cutoff = today_jst().isoformat()
-    rows = sb.table('hq_daily_reports').select('date').lt('date',cutoff).is_('finalized_at','null').execute().data
-    finalized = []
-    for r in rows:
-        if finalize_report(r['date']):
-            finalized.append(r['date'])
-    return jsonify({'ok': True, 'finalized': finalized, 'count': len(finalized)})
 
 @app.route('/api/daily-info/<date_str>', methods=['POST'])
 def save_daily_info(date_str):
     d = request.json
-    existing = sb.table('hq_daily_reports').select('date,finalized_at').eq('date',date_str).execute().data
+    existing = sb.table('hq_daily_reports').select('date').eq('date',date_str).execute().data
     if existing:
-        # 確定済みは weather / note のみ更新可
-        if existing[0].get('finalized_at'):
-            sb.table('hq_daily_reports').update({'weather':d.get('weather',''),'note':d.get('note','')}).eq('date',date_str).execute()
-        else:
-            sb.table('hq_daily_reports').update({'weather':d.get('weather',''),'note':d.get('note',''),'separate_orders':d.get('separate_orders',0)}).eq('date',date_str).execute()
+        sb.table('hq_daily_reports').update({'weather':d.get('weather',''),'note':d.get('note',''),'separate_orders':d.get('separate_orders',0)}).eq('date',date_str).execute()
     else:
         sb.table('hq_daily_reports').insert({'date':date_str,'weather':d.get('weather',''),'note':d.get('note',''),'separate_orders':d.get('separate_orders',0),'total_sales':0,'material_cost':0,'labor_cost':0,'expense':0,'profit':0,'labor_productivity':0,'total_hours':0,'west_sales':0,'south_sales':0,'other_sales':0}).execute()
     return jsonify({'ok': True})
@@ -609,11 +535,6 @@ def save_daily_info(date_str):
 @app.route('/api/daily-reports/<date_str>', methods=['POST'])
 def save_daily_report(date_str):
     d = request.json
-    existing = sb.table('hq_daily_reports').select('finalized_at').eq('date',date_str).execute().data
-    # 確定済みは weather / note のみ更新可
-    if existing and existing[0].get('finalized_at'):
-        sb.table('hq_daily_reports').update({'weather':d.get('weather',''),'note':d.get('note','')}).eq('date',date_str).execute()
-        return jsonify({'ok': True, 'locked': True})
     data = {'date':date_str,'weather':d.get('weather'),'total_sales':d.get('total_sales',0),'separate_orders':d.get('separate_orders',0),
             'material_cost':d.get('material_cost',0),'labor_cost':d.get('labor_cost',0),'expense':d.get('expense',0),
             'profit':d.get('profit',0),'labor_productivity':d.get('labor_productivity',0),'total_hours':d.get('total_hours',0),
@@ -623,12 +544,10 @@ def save_daily_report(date_str):
 
 @app.route('/api/daily-reports/<date_str>/generate', methods=['POST'])
 def generate_daily_report(date_str):
-    existing = sb.table('hq_daily_reports').select('note,finalized_at').eq('date',date_str).execute().data
-    if existing and existing[0].get('finalized_at'):
-        return jsonify({'ok': False, 'error': 'finalized'}), 409
     calc    = calc_daily_report(date_str)
     weather = request.json.get('weather','') if request.json else ''
     note    = request.json.get('note','')    if request.json else ''
+    existing = sb.table('hq_daily_reports').select('note').eq('date',date_str).execute().data
     saved_note = existing[0]['note'] if existing else note
     data = {'date':date_str,'weather':weather,'total_sales':calc['total_sales'],'separate_orders':calc['separate_orders'],
             'material_cost':calc['material_cost'],'labor_cost':calc['labor_cost'],'expense':calc['expense'],
@@ -657,47 +576,6 @@ def monthly_summary():
                'avg_labor_prod':round(avg_lp,0),
                'west_sales':sum(d['west_sales'] for d in days),'south_sales':sum(d['south_sales'] for d in days),'other_sales':sum(d['other_sales'] for d in days)}
     return jsonify({'month':ym,'days':days,'summary':summary})
-
-# ─── 年次サマリ ────────────────────────────────
-@app.route('/api/yearly-summary', methods=['GET'])
-def yearly_summary():
-    year = request.args.get('year')
-    rows = sb.table('hq_daily_reports').select('*').like('date',year+'%').order('date').execute().data
-    if not rows:
-        return jsonify({'year':year,'months':[],'summary':{}})
-    months = {}
-    for d in rows:
-        m = d['date'][:7]
-        if m not in months:
-            months[m] = {'month':m,'total_sales':0,'total_labor':0,'total_profit':0,'total_hours':0,
-                         'op_days':0,'west_sales':0,'south_sales':0,'other_sales':0}
-        months[m]['total_sales']  += d.get('total_sales',0)  or 0
-        months[m]['total_labor']  += d.get('labor_cost',0)   or 0
-        months[m]['total_profit'] += d.get('profit',0)       or 0
-        months[m]['total_hours']  += d.get('total_hours',0)  or 0
-        months[m]['op_days']      += 1
-        months[m]['west_sales']   += d.get('west_sales',0)   or 0
-        months[m]['south_sales']  += d.get('south_sales',0)  or 0
-        months[m]['other_sales']  += d.get('other_sales',0)  or 0
-    months_list = sorted(months.values(), key=lambda x: x['month'])
-    for m in months_list:
-        ts = m['total_sales']
-        m['profit_rate']    = round(m['total_profit']/ts*100,1) if ts else 0
-        m['labor_rate']     = round(m['total_labor']/ts*100,1)  if ts else 0
-        m['avg_labor_prod'] = round(ts/m['total_hours'],0)      if m['total_hours'] else 0
-    total_sales = sum(d.get('total_sales',0) or 0 for d in rows)
-    total_labor = sum(d.get('labor_cost',0)  or 0 for d in rows)
-    total_profit= sum(d.get('profit',0)      or 0 for d in rows)
-    total_hours = sum(d.get('total_hours',0) or 0 for d in rows)
-    summary = {'total_sales':total_sales,'total_profit':total_profit,
-               'profit_rate':round(total_profit/total_sales*100,1) if total_sales else 0,
-               'total_labor':total_labor,'labor_rate':round(total_labor/total_sales*100,1) if total_sales else 0,
-               'op_days':len(rows),'avg_daily_sales':int(total_sales/len(rows)) if rows else 0,
-               'avg_labor_prod':round(total_sales/total_hours,0) if total_hours else 0,
-               'west_sales':sum(d.get('west_sales',0)   or 0 for d in rows),
-               'south_sales':sum(d.get('south_sales',0) or 0 for d in rows),
-               'other_sales':sum(d.get('other_sales',0) or 0 for d in rows)}
-    return jsonify({'year':year,'months':months_list,'summary':summary})
 
 # ─── 印刷用データ ─────────────────────────────
 @app.route('/api/print/shipping-plan', methods=['GET'])
