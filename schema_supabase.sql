@@ -103,6 +103,20 @@ CREATE TABLE IF NOT EXISTS hq_subcategories (
     active      INTEGER DEFAULT 1,
     UNIQUE (category_id, name)
 );
+-- dx.InstoreOrder のミラー（履歴保持のため hq 側にも保存）
+CREATE TABLE IF NOT EXISTS hq_instore_orders (
+    id            BIGSERIAL PRIMARY KEY,
+    date          TEXT NOT NULL,
+    store_id      INTEGER NOT NULL,
+    product_name  TEXT NOT NULL,
+    customer_name TEXT DEFAULT '',
+    quantity      INTEGER DEFAULT 0,
+    price         INTEGER DEFAULT 0,
+    category      TEXT DEFAULT '弁当',
+    source_id     TEXT UNIQUE,
+    synced_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS hq_instore_orders_date_idx ON hq_instore_orders (date);
 -- 初期データ（現行のハードコード値を再現）
 INSERT INTO hq_categories (name, sort_order) VALUES
     ('弁当', 1), ('寿司', 2), ('惣菜', 3), ('その他', 4)

@@ -20,6 +20,14 @@ sb = create_client(
     os.environ.get('SUPABASE_URL', ''),
     os.environ.get('SUPABASE_SERVICE_KEY', '')
 )
+# dx 用クライアントは sb と独立に生成する。
+# supabase-py の Client.schema() は内部 postgrest のヘッダを破壊的に書き換えるため、
+# 同じ sb で schema('dx') を呼ぶと以降の sb.table(...) も dx を見にいって全壊する。
+sb_dx = create_client(
+    os.environ.get('SUPABASE_URL', ''),
+    os.environ.get('SUPABASE_SERVICE_KEY', '')
+)
+sb_dx.postgrest.schema('dx')
 
 MONTHLY_FIXED_COST = 300000
 
@@ -768,6 +776,71 @@ def get_bento_orders():
             'note':           o.get('note', ''),
         })
     return jsonify(result)
+
+# ─── 店頭注文（dx スキーマ連携）─────────────────
+# 前提：
+#   dx.InstoreOrder ＝ id, storeId, productName, quantity, customerName, deliveryDate
+#   dx.OrderProduct ＝ productName, category, price
+#   storeId は hq_channels.id と一致
+# dx 側カラム名が異なる場合は下記の SELECT/参照キーを調整してください。
+DX_INSTORE_TABLE = 'InstoreOrder'
+DX_PRODUCT_TABLE = 'OrderProduct'
+DX_DATE_COL      = 'deliveryDate'
+
+@app.route('/api/instore/orders', methods=['GET'])
+def get_instore_orders():
+    """dx.InstoreOrder + dx.OrderProduct から取得し hq_instore_orders に mirror して返す。
+    過去日は dx を叩かず hq の保存値だけ返す（履歴凍結）。"""
+    target_date = request.args.get('date')
+    if not target_date:
+        return jsonify({'error':'date required'}), 400
+
+    # 過去日 → hq のキャッシュだけ返す
+    if target_date < today_jst().isoformat():
+        rows = sb.table('hq_instore_orders').select('*').eq('date',target_date).order('id').execute().data
+        return jsonify(rows)
+
+    # 当日以降 → dx から取得して mirror（sb_dx は dx 専用クライアント）
+    try:
+        dx_orders = sb_dx.table(DX_INSTORE_TABLE)\
+            .select(f'id,storeId,productName,quantity,customerName,{DX_DATE_COL}')\
+            .eq(DX_DATE_COL, target_date).execute().data
+    except Exception as e:
+        # dx 接続失敗時は hq のキャッシュにフォールバック
+        rows = sb.table('hq_instore_orders').select('*').eq('date',target_date).order('id').execute().data
+        return jsonify(rows)
+
+    if not dx_orders:
+        return jsonify([])
+
+    names = list({o['productName'] for o in dx_orders})
+    try:
+        dx_prods = sb_dx.table(DX_PRODUCT_TABLE)\
+            .select('productName,category,price').in_('productName', names).execute().data
+    except Exception:
+        dx_prods = []
+    prod_map = {p['productName']: p for p in dx_prods}
+
+    mirror_rows = []
+    for o in dx_orders:
+        p = prod_map.get(o['productName'], {})
+        src = o.get('id')
+        source_id = str(src) if src is not None else f'{target_date}|{o["storeId"]}|{o["productName"]}|{o.get("customerName","")}'
+        mirror_rows.append({
+            'date':          target_date,
+            'store_id':      o['storeId'],
+            'product_name':  o['productName'],
+            'customer_name': o.get('customerName') or '',
+            'quantity':      o.get('quantity') or 0,
+            'price':         p.get('price')    or 0,
+            'category':      p.get('category') or '弁当',
+            'source_id':     source_id,
+        })
+    if mirror_rows:
+        sb.table('hq_instore_orders').upsert(mirror_rows, on_conflict='source_id').execute()
+
+    rows = sb.table('hq_instore_orders').select('*').eq('date',target_date).order('id').execute().data
+    return jsonify(rows)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5050)
