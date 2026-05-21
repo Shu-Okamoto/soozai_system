@@ -568,5 +568,47 @@ def print_shipping_plan():
             result['products'].append(row)
     return jsonify(result)
 
+# ─── 注文弁当（bento app 連携）────────────────
+@app.route('/api/bento/orders', methods=['GET'])
+def get_bento_orders():
+    """明日以降の注文を取得（offices / members / products を JOIN）"""
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    try:
+        orders = sb.table('orders').select('*').gte('delivery_date', tomorrow).order('delivery_date').order('created_at').execute().data
+    except Exception as e:
+        return jsonify({'error': f'orders取得失敗: {e}'}), 500
+    if not orders:
+        return jsonify([])
+
+    office_ids  = list({o['office_id']  for o in orders if o.get('office_id')})
+    member_ids  = list({o['member_id']  for o in orders if o.get('member_id')})
+    product_ids = list({o['product_id'] for o in orders if o.get('product_id')})
+
+    def safe_in(table, ids, fields='id,name'):
+        if not ids: return {}
+        try:
+            rows = sb.table(table).select(fields).in_('id', ids).execute().data
+            return {r['id']: r for r in rows}
+        except Exception:
+            return {}
+
+    offices  = safe_in('offices',  office_ids)
+    members  = safe_in('members',  member_ids)
+    products = safe_in('products', product_ids)
+
+    result = []
+    for o in orders:
+        result.append({
+            'id':             o['id'],
+            'delivery_date':  o['delivery_date'],
+            'office_name':    offices.get(o.get('office_id'),  {}).get('name', ''),
+            'member_name':    members.get(o.get('member_id'),  {}).get('name', ''),
+            'product_name':   products.get(o.get('product_id'),{}).get('name', ''),
+            'quantity':       o.get('quantity', 0),
+            'payment_method': o.get('payment_method', ''),
+            'note':           o.get('note', ''),
+        })
+    return jsonify(result)
+
 if __name__ == '__main__':
     app.run(debug=True, port=5050)

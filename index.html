@@ -287,20 +287,69 @@ let cachedChannels      = [];
 let cachedMembers       = [];
 let cachedCategories    = [];
 let cachedSubcategories = [];
+let cachedBentoOrders   = [];
 
 async function initData() {
   try {
-    [cachedProducts, cachedChannels, cachedMembers, cachedCategories, cachedSubcategories] = await Promise.all([
+    [cachedProducts, cachedChannels, cachedMembers, cachedCategories, cachedSubcategories, cachedBentoOrders] = await Promise.all([
       fetch(API+'/products').then(r=>r.json()),
       fetch(API+'/channels').then(r=>r.json()),
       fetch(API+'/members').then(r=>r.json()),
       fetch(API+'/categories').then(r=>r.json()).catch(()=>[]),
-      fetch(API+'/subcategories').then(r=>r.json()).catch(()=>[])
+      fetch(API+'/subcategories').then(r=>r.json()).catch(()=>[]),
+      fetch(API+'/bento/orders').then(r=>r.json()).catch(()=>[])
     ]);
   } catch(e) {
     showToast('APIサーバー未起動。python app.py を実行してください。', true);
   }
   showPage('plan');
+}
+
+// 注文弁当の別表HTMLを返す（colspan指定）
+function buildBentoOrdersTable(colspan) {
+  if (!Array.isArray(cachedBentoOrders) || !cachedBentoOrders.length) return '';
+  const dowJa = ['日','月','火','水','木','金','土'];
+  const fmtDate = d => {
+    const dt = new Date(d);
+    return `${d.slice(5).replace('-','/')}（${dowJa[dt.getDay()]}）`;
+  };
+  let lastDate = null;
+  const rows = cachedBentoOrders.map(o => {
+    const dateHeader = (o.delivery_date !== lastDate)
+      ? `<tr style="background:#FFF3E0"><td colspan="9" style="font-weight:700;padding:4px 8px;color:#E65100">📅 ${fmtDate(o.delivery_date)}</td></tr>`
+      : '';
+    lastDate = o.delivery_date;
+    return dateHeader + `<tr>
+      <td>${o.office_name||''}</td>
+      <td>${o.member_name||''}</td>
+      <td>${o.product_name||''}</td>
+      <td class="text-center">${o.quantity||''}</td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td class="text-center">${o.payment_method||''}</td>
+      <td>${o.note||''}</td>
+    </tr>`;
+  }).join('');
+  const inner = `
+    <div style="margin:8px 0;padding:8px;background:#FFF8E1;border:1px solid #FFB300;border-radius:6px">
+      <div style="font-weight:700;color:#E65100;margin-bottom:4px">📋 注文弁当（明日以降）${cachedBentoOrders.length}件</div>
+      <table style="width:100%;font-size:13px;background:white">
+        <thead><tr style="background:#FFE0B2">
+          <th style="text-align:left;padding:4px 6px">店舗</th>
+          <th style="text-align:left;padding:4px 6px">お名前</th>
+          <th style="text-align:left;padding:4px 6px">商品</th>
+          <th style="padding:4px 6px">数量</th>
+          <th style="padding:4px 6px">受取時間</th>
+          <th style="padding:4px 6px">用途</th>
+          <th style="padding:4px 6px">おかず</th>
+          <th style="padding:4px 6px">領収書</th>
+          <th style="text-align:left;padding:4px 6px">備考</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+  return `<tr class="bento-orders-row"><td colspan="${colspan}" style="padding:0;background:transparent">${inner}</td></tr>`;
 }
 
 // ハードコード値のフォールバック（マスタ未投入時の互換性のため）
@@ -412,11 +461,12 @@ async function renderPlanPage() {
     const chHeader = chs.map(ch=>`<th style="min-width:58px">${ch.name}</th>`).join('') + '<th style="min-width:52px;background:#E8F0E8">合計</th>';
 
     const catOrder = getCatOrder();
+    const planColspan = 2+chs.length+1;
     let body = '';
     catOrder.forEach(cat => {
       const catProds = prods.filter(p=>p.category===cat);
       if (!catProds.length) return;
-      body += `<tr><td class="fw-bold" colspan="${2+chs.length+1}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ ${cat}</td></tr>`;
+      body += `<tr><td class="fw-bold" colspan="${planColspan}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ ${cat}</td></tr>`;
       catProds.forEach(p => {
         const cells = chs.map(ch => {
           const v = planMap[targetDate]?.[p.id]?.[ch.id] || 0;
@@ -430,6 +480,7 @@ async function renderPlanPage() {
           <td class="fw-bold" style="background:#F0F7F0" id="rt_${p.id}_${targetDate}">${rowTotal||''}</td>
         </tr>`;
       });
+      if (cat === '弁当') body += buildBentoOrdersTable(planColspan);
     });
 
     // 列合計行
@@ -713,11 +764,12 @@ async function renderActualPage() {
     '<th style="min-width:72px;background:#E8F0E8;font-size:20px">合計</th>';
 
   const catOrder = getCatOrder();
+  const actualColspan = 2+chs.length+1;
   let tableBody = '';
   catOrder.forEach(cat => {
     const catProds = activeProds.filter(p=>p.category===cat);
     if (!catProds.length) return;
-    tableBody += `<tr><td class="fw-bold" colspan="${2+chs.length+1}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ ${cat}</td></tr>`;
+    tableBody += `<tr><td class="fw-bold" colspan="${actualColspan}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ ${cat}</td></tr>`;
     catProds.forEach(p => {
       const cells = chs.map(ch => {
         const actual = actualMap[p.id]?.[ch.id]||0;
@@ -742,6 +794,7 @@ async function renderActualPage() {
         <td class="fw-bold" style="background:#F0F7F0;text-align:center" id="at_${p.id}">${actualTotal||''}</td>
       </tr>`;
     });
+    if (cat === '弁当') tableBody += buildBentoOrdersTable(actualColspan);
   });
 
   const actColTotals = chs.map(ch=>prods.reduce((s,p)=>s+(actualMap[p.id]?.[ch.id]||0),0));
@@ -1075,9 +1128,11 @@ async function renderReportPage() {
   let grandTotal = 0, grandQty = 0;
   let matrixBody = '';
   let lastCat = null;
+  const reportColspan = 4+channels.length;
   allPids.forEach(pid => {
     const p = prodInfo[pid];
     if (p.category !== lastCat) {
+      if (lastCat === '弁当') matrixBody += buildBentoOrdersTable(reportColspan);
       matrixBody += `<tr><td class="fw-bold" colspan="${3+channels.length}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ ${p.category}</td></tr>`;
       lastCat = p.category;
     }
@@ -1099,6 +1154,7 @@ async function renderReportPage() {
       <td class="text-right fw-bold" style="background:#F0F7F0">${rowAmt ? fmt(rowAmt) : '―'}</td>
     </tr>`;
   });
+  if (lastCat === '弁当') matrixBody += buildBentoOrdersTable(reportColspan);
   const totalCells = channels.map(c=>`<td class="text-right fw-bold" style="background:#E8F0E8">${chQtyTotals[c.id]||'―'}</td>`).join('');
   const amtCells   = channels.map(c=>`<td class="text-right fw-bold" style="background:#F0F7F0;color:#2E7D32">${chTotals[c.id]?fmt(chTotals[c.id]):'―'}</td>`).join('');
   matrixBody += `<tr style="background:var(--surface2)">
