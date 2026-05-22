@@ -581,7 +581,8 @@ async function renderPlanPage() {
       <span>煮しめ：<strong id="nishime-calc-p">―</strong></span>
     </div>
     <div class="no-print btn-group mb-16">
-      ${isAdmin ? `<button class="btn btn-secondary btn-sm" onclick="copyLastWeek('${days[0]}')">◀ 前の週と同じ</button>` : ''}
+      ${isAdmin ? `<button class="btn btn-secondary btn-sm" onclick="shiftPlanWeek(-7)">◀ 前の週へ</button>
+      <button class="btn btn-secondary btn-sm" onclick="shiftPlanWeek(7)">次の週へ ▶</button>` : ''}
       <button class="btn btn-primary btn-sm" onclick="savePlans()">💾 保存</button>
       ${isAdmin ? `<div style="display:flex;gap:6px;margin:0 8px;background:var(--surface2);border-radius:6px;padding:3px;border:1px solid var(--border)">
         <button class="btn btn-sm ${isDayMode?'btn-primary':'btn-secondary'}" style="padding:3px 12px" onclick="planViewMode='day';renderPlanPage()">一日</button>
@@ -609,6 +610,7 @@ async function renderPlanPage() {
         煮しめ：<span id="nishime-calc">―</span>
       </div>
       <div style="margin-left:auto;display:flex;gap:8px">
+        ${isAdmin ? `<button class="btn btn-secondary btn-sm" onclick="copyLastWeek('${days[0]}')">📋 前の週の予定をコピー</button>` : ''}
         ${isAdmin ? '' : `<button class="btn btn-warn btn-sm" onclick="goToActual('${todayDate}')">✏️ ${todayLabel}の実績入力へ</button>`}
         <button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 ${todayLabel}を印刷</button>
       </div>
@@ -727,6 +729,15 @@ async function copyLastWeek(dstFrom) {
   }).then(r=>r.json()).catch(()=>null);
   if (r?.ok) { showToast(`${r.copied}件コピーしました`); renderPlanPage(); }
   else showToast('コピー失敗',true);
+}
+
+function shiftPlanWeek(deltaDays) {
+  const d = new Date(currentDate);
+  d.setDate(d.getDate() + deltaDays);
+  const next = d.toISOString().slice(0, 10);
+  currentDate = next;
+  document.getElementById('global-date').value = next;
+  renderPlanPage();
 }
 
 async function goToActual(date) {
@@ -1396,18 +1407,21 @@ async function updateExpense(date) {
 // ═══════════════════════════════════════════════
 // 週間献立
 // ═══════════════════════════════════════════════
-const MENU_CATS = ['メイン（煮物）','煮物①','煮物②','酢もの①','酢もの②','天ぷら','デラックスメイン','メイン肉','魚','サラダ①','サラダ②','漬物'];
+const MENU_CATS = ['メイン（煮物）','煮物①','酢もの①','サラダ①','天ぷら','デラックスメイン','メイン肉','魚','NPOメイン'];
 // getSubcats / getCatOrder / cachedCategories はinitData近辺で定義済み
 const MENU_CAT_TO_SUBCAT = {
-  'メイン（煮物）':'煮物','煮物①':'煮物','煮物②':'煮物',
-  '酢もの①':'酢もの','酢もの②':'酢もの',
+  'メイン（煮物）':'煮物','煮物①':'煮物',
+  '酢もの①':'酢もの',
   '天ぷら':'天ぷら','魚':'魚',
   'デラックスメイン':['メイン肉','揚げ物','魚'],
   'メイン肉':['メイン肉','揚げ物'],
-  'サラダ①':'サラダ','サラダ②':'サラダ',
-  '漬物':'漬物',
+  'NPOメイン':['メイン肉','揚げ物','魚'],
+  'サラダ①':'サラダ',
 };
+const MENU_CAT_LABEL = { '魚':'メイン魚' };
 const REMOVABLE_FIXED_CATS = new Set(['デラックスメイン','メイン肉']);
+const MAIN_GROUP_CATS = new Set(['天ぷら','デラックスメイン','メイン肉','魚','NPOメイン']);
+const MAIN_GROUP_BG = '#FFE8D6';
 const DOW_LABELS = ['月','火','水','木','金','土'];
 let extraMenuRowCount = 0;
 let _menuCurrentMonday = '';
@@ -1442,12 +1456,14 @@ async function renderMenuPage() {
       : subcat ? souzaiProds.filter(p=>p.subcategory===subcat)
       : souzaiProds;
     const removable = REMOVABLE_FIXED_CATS.has(cat);
+    const labelText = MENU_CAT_LABEL[cat] || cat;
+    const bgStyle = MAIN_GROUP_CATS.has(cat) ? `background:${MAIN_GROUP_BG};` : '';
     const labelCell = removable
-      ? `<div class="wc cat" data-extra-row="${cat}" style="display:flex;align-items:center;justify-content:space-between">
-          <span>${cat}</span>
+      ? `<div class="wc cat" data-extra-row="${cat}" style="${bgStyle}display:flex;align-items:center;justify-content:space-between">
+          <span>${labelText}</span>
           <button class="btn btn-secondary btn-sm no-print" style="padding:1px 5px;color:var(--danger)" onclick="removeMenuRow('${cat}')">×</button>
         </div>`
-      : '<div class="wc cat">'+cat+'</div>';
+      : `<div class="wc cat" style="${bgStyle}">${labelText}</div>`;
     return [labelCell,
       ...days.map((_,i)=>{
         const dow=i+1;
@@ -1459,7 +1475,7 @@ async function renderMenuPage() {
     ].join('');
   }).join('');
 
-  // 保存済みのおまかせ行を検出
+  // 保存済みのおかず行を検出
   const savedExtras = [...new Set(
     menus.filter(m=>!MENU_CATS.includes(m.category)).map(m=>m.category)
   )].sort();
@@ -1511,7 +1527,7 @@ function shiftMenuWeek(currentMonday, deltaDays) {
 
 function buildExtraMenuRow(catKey, days, menuMap, allProdOpts) {
   const labelCell = `<div class="wc cat" data-extra-row="${catKey}" style="display:flex;align-items:center;justify-content:space-between">
-    <span>おまかせ</span>
+    <span>おかず</span>
     <button class="btn btn-secondary btn-sm no-print" style="padding:1px 5px;color:var(--danger)" onclick="removeMenuRow('${catKey}')">×</button>
   </div>`;
   const dayCells = days.map((_,i)=>{
@@ -1527,7 +1543,7 @@ function buildExtraMenuRow(catKey, days, menuMap, allProdOpts) {
 
 function addMenuRow() {
   extraMenuRowCount++;
-  const catKey = `おまかせ_${extraMenuRowCount}`;
+  const catKey = `おかず_${extraMenuRowCount}`;
   const days = getWeekDays(_menuCurrentMonday);
   const allProdOpts = '<option value="">―</option>' + cachedProducts.map(p=>`<option value="${p.name}">${p.name}</option>`).join('');
   const html = buildExtraMenuRow(catKey, days, {}, allProdOpts);
@@ -2156,9 +2172,11 @@ async function renderAdminShiftsPage() {
 
   document.getElementById('content').innerHTML = `
     <div class="no-print btn-group mb-16">
-      <button class="btn btn-secondary btn-sm" onclick="copyPrevWeekShifts('${mondayStr}')">◀ 前の週と同じ</button>
+      <button class="btn btn-secondary btn-sm" onclick="shiftAdminShiftsWeek('${mondayStr}',-7)">◀ 前の週へ</button>
+      <button class="btn btn-secondary btn-sm" onclick="shiftAdminShiftsWeek('${mondayStr}',7)">次の週へ ▶</button>
       <button class="btn btn-primary btn-sm" onclick="saveWeekShifts('${mondayStr}')">💾 保存</button>
       <span class="text-muted" style="font-size:12px;align-self:center">${mondayStr} 〜 ${days[5]}</span>
+      <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="copyPrevWeekShifts('${mondayStr}')">📋 前の週のシフトをコピー</button>
     </div>
     <div class="card">
       <div class="card-header">
@@ -2191,6 +2209,15 @@ async function saveWeekShifts(mondayStr) {
     body: JSON.stringify({week_start: mondayStr, shifts})
   }).then(r => r.json()).catch(() => null);
   if (r?.ok) showToast('保存しました'); else showToast('保存失敗', true);
+}
+
+function shiftAdminShiftsWeek(currentMonday, deltaDays) {
+  const d = new Date(currentMonday);
+  d.setDate(d.getDate() + deltaDays);
+  const next = d.toISOString().slice(0, 10);
+  currentDate = next;
+  document.getElementById('global-date').value = next;
+  renderAdminShiftsPage();
 }
 
 async function copyPrevWeekShifts(dstMonday) {
