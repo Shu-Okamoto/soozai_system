@@ -343,39 +343,32 @@ function buildInstoreOrderRows(channels, mode) {
 }
 
 
-// 注文弁当の別表HTMLを返す（colspan指定）
-function buildBentoOrdersTable(colspan) {
+// 注文弁当（bento システム）の行HTMLを返す。dx と同じく matrix 内に行追加（配達チャネル列に数量）
+// mode: 'plan' | 'actual' | 'report'
+function buildBentoOrderRows(channels, mode) {
   if (!Array.isArray(cachedBentoOrders) || !cachedBentoOrders.length) return '';
-  const rows = cachedBentoOrders.map(o => `<tr>
-      <td>${o.office_name||''}</td>
-      <td>${o.member_name||''}</td>
-      <td>${o.product_name||''}</td>
-      <td class="text-center">${o.quantity||''}</td>
-      <td></td>
-      <td></td>
-      <td></td>
-      <td class="text-center">${o.payment_method||''}</td>
-      <td>${o.note||''}</td>
-    </tr>`).join('');
-  const inner = `
-    <div style="margin:8px 0;padding:8px;background:#FFF8E1;border:1px solid #FFB300;border-radius:6px">
-      <div style="font-weight:700;color:#E65100;margin-bottom:4px">📋 注文弁当 ${cachedBentoOrders.length}件</div>
-      <table style="width:100%;font-size:13px;background:white">
-        <thead><tr style="background:#FFE0B2">
-          <th style="text-align:left;padding:4px 6px">店舗</th>
-          <th style="text-align:left;padding:4px 6px">お名前</th>
-          <th style="text-align:left;padding:4px 6px">商品</th>
-          <th style="padding:4px 6px">数量</th>
-          <th style="padding:4px 6px">受取時間</th>
-          <th style="padding:4px 6px">用途</th>
-          <th style="padding:4px 6px">おかず</th>
-          <th style="padding:4px 6px">領収書</th>
-          <th style="text-align:left;padding:4px 6px">備考</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
-  return `<tr class="bento-orders-row"><td colspan="${colspan}" style="padding:0;background:transparent">${inner}</td></tr>`;
+  const deliveryCh = channels.find(c => c.name === '配達');
+  if (!deliveryCh) return '';  // 配達チャネル未登録時は表示できないのでスキップ
+  return cachedBentoOrders.map(o => {
+    const qty   = Math.round(o.quantity || 0);
+    const price = Math.round(o.price    || 0);
+    const amt   = qty * price;
+    const channelCells = channels.map(ch => {
+      const v = (ch.id === deliveryCh.id) ? qty : 0;
+      return `<td class="text-center" style="background:#FFF8E1;color:#E65100">${v || ''}</td>`;
+    }).join('');
+    const nameSuffix = [o.office_name, o.member_name].filter(Boolean).join(' ');
+    const nameCell  = `<td class="left" style="white-space:nowrap;color:#E65100;background:#FFFDE7">${o.product_name||''}（${nameSuffix?nameSuffix+'様':''}）</td>`;
+    const priceCell = `<td style="background:#FFFDE7;color:var(--text2);white-space:nowrap">¥${price.toLocaleString()}</td>`;
+    let tailCells;
+    if (mode === 'report') {
+      tailCells = `<td class="text-right fw-bold" style="background:#F5F5F5">${qty||'―'}</td>
+        <td class="text-right fw-bold" style="background:#F0F7F0">${amt?fmt(amt):'―'}</td>`;
+    } else {
+      tailCells = `<td class="fw-bold text-center" style="background:#F0F7F0">${qty||''}</td>`;
+    }
+    return `<tr data-bento-row="1" style="background:#FFFDE7">${nameCell}${priceCell}${channelCells}${tailCells}</tr>`;
+  }).join('');
 }
 
 // ハードコード値のフォールバック（マスタ未投入時の互換性のため）
@@ -509,20 +502,25 @@ async function renderPlanPage() {
         </tr>`;
       });
       if (cat === '弁当') {
-        // dx 由来の店頭注文を 弁当 末尾に read-only 行で表示（行追加方式）
+        // dx 店頭注文 + bento 注文を 弁当 末尾に行追加（read-only）
         body += buildInstoreOrderRows(chs, 'plan');
-        body += buildBentoOrdersTable(planColspan);
+        body += buildBentoOrderRows(chs, 'plan');
       }
     });
 
-    // 列合計行（dx 注文も加算）
+    // 列合計行（dx 注文・bento 注文も加算）
+    const deliveryCh    = chs.find(c => c.name === '配達');
+    const deliveryChId  = deliveryCh ? deliveryCh.id : null;
     const instoreColSum = ch => cachedInstoreOrders.filter(o=>o.store_id===ch.id).reduce((s,o)=>s+(o.quantity||0),0);
+    const bentoColSum   = ch => (deliveryChId !== null && ch.id === deliveryChId)
+      ? cachedBentoOrders.reduce((s,o)=>s+(o.quantity||0),0) : 0;
     const colTotals = chs.map(ch=>{
-      const t = prods.reduce((s,p)=>s+(planMap[targetDate]?.[p.id]?.[ch.id]||0),0) + instoreColSum(ch);
+      const t = prods.reduce((s,p)=>s+(planMap[targetDate]?.[p.id]?.[ch.id]||0),0) + instoreColSum(ch) + bentoColSum(ch);
       return `<td class="fw-bold" style="background:#E8F0E8" id="ct_${ch.id}_${targetDate}">${t||''}</td>`;
     }).join('');
     const grandTotal = chs.reduce((s,ch)=>s+prods.reduce((ss,p)=>ss+(planMap[targetDate]?.[p.id]?.[ch.id]||0),0),0)
-                     + cachedInstoreOrders.reduce((s,o)=>s+(o.quantity||0),0);
+                     + cachedInstoreOrders.reduce((s,o)=>s+(o.quantity||0),0)
+                     + cachedBentoOrders.reduce((s,o)=>s+(o.quantity||0),0);
     body += `<tr style="background:var(--surface2)">
       <td class="fw-bold left" colspan="2" style="font-size:12px">合　計</td>
       ${colTotals}
@@ -688,8 +686,8 @@ function updateRiceCalc() {
     if (tenpuraPids.has(pid))  tenpuraTotal  += v;
     if (nishimePids.has(pid))  nishimeTotal  += v;
   });
-  // dx 注文：master 参照せず、product_name の文字列パターンから直接分類（ヒューリスティック）
-  cachedInstoreOrders.forEach(o => {
+  // dx 店頭注文 + bento 注文：master 参照せず product_name の文字列パターンから直接分類（ヒューリスティック）
+  const classifyOrder = o => {
     const name = o.product_name || '';
     const cat  = o.category     || '弁当';
     const v    = Math.round(o.quantity || 0);
@@ -714,7 +712,9 @@ function updateRiceCalc() {
          name.includes('2000円') || name.includes('2500円') || name.includes('3000円'))) {
       nishimeTotal += v;
     }
-  });
+  };
+  cachedInstoreOrders.forEach(classifyOrder);
+  cachedBentoOrders.forEach(classifyOrder);
 
   function toSho(n) { return Math.ceil(n * 185 / 3600 * 10) / 10; }
   function set(id, val) { const el=document.getElementById(id); if(el) el.textContent=val; }
@@ -741,13 +741,17 @@ function updateRowTotal(inp) {
   const rowSum = Array.from(rowInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
   const rtEl = document.getElementById(`rt_${pid}_${date}`);
   if (rtEl) rtEl.textContent = rowSum || '';
-  // 列合計（dx 注文も加算）
+  // 列合計（dx 店頭注文・bento 注文も加算）
   const cid = inp.dataset.cid;
   const colInputs = document.querySelectorAll(`#plan-table input[data-cid="${cid}"][data-date="${date}"]`);
   const colInputSum = Array.from(colInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
   const dxSum = cachedInstoreOrders.filter(o=>o.store_id===+cid).reduce((s,o)=>s+(o.quantity||0),0);
+  const chsForLookup = cachedChannels;
+  const deliveryCh   = chsForLookup.find(c => c.name === '配達');
+  const bentoSum     = (deliveryCh && deliveryCh.id === +cid)
+    ? cachedBentoOrders.reduce((s,o)=>s+(o.quantity||0),0) : 0;
   const ctEl = document.getElementById(`ct_${cid}_${date}`);
-  if (ctEl) ctEl.textContent = (colInputSum+dxSum) || '';
+  if (ctEl) ctEl.textContent = (colInputSum+dxSum+bentoSum) || '';
   updateRiceCalc();
 }
 
@@ -874,14 +878,18 @@ async function renderActualPage() {
       </tr>`;
     });
     if (cat === '弁当') {
-      // dx 店頭注文を 弁当 末尾に行追加（read-only）
+      // dx 店頭注文 + bento 注文を 弁当 末尾に行追加（read-only）
       tableBody += buildInstoreOrderRows(chs, 'actual');
-      tableBody += buildBentoOrdersTable(actualColspan);
+      tableBody += buildBentoOrderRows(chs, 'actual');
     }
   });
 
+  const deliveryChAct   = chs.find(c => c.name === '配達');
+  const deliveryChIdAct = deliveryChAct ? deliveryChAct.id : null;
   const instoreColSum = ch => cachedInstoreOrders.filter(o=>o.store_id===ch.id).reduce((s,o)=>s+(o.quantity||0),0);
-  const actColTotals = chs.map(ch=>prods.reduce((s,p)=>s+(actualMap[p.id]?.[ch.id]||0),0) + instoreColSum(ch));
+  const bentoColSum   = ch => (deliveryChIdAct !== null && ch.id === deliveryChIdAct)
+    ? cachedBentoOrders.reduce((s,o)=>s+(o.quantity||0),0) : 0;
+  const actColTotals = chs.map(ch=>prods.reduce((s,p)=>s+(actualMap[p.id]?.[ch.id]||0),0) + instoreColSum(ch) + bentoColSum(ch));
   const actGrand = actColTotals.reduce((s,v)=>s+v,0);
 
   tableBody += `
@@ -1020,19 +1028,23 @@ function updateActualTotals(inp) {
   const atEl = document.getElementById(`at_${pid}`);
   if (atEl) atEl.textContent = rowActual||'';
 
-  // 列合計（dx 注文も加算）
+  // 列合計（dx 店頭注文・bento 注文も加算）
   const colInputs = document.querySelectorAll(`table input[data-cid="${cid}"]`);
   const colInputSum = Array.from(colInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
   const colDxSum = cachedInstoreOrders.filter(o=>o.store_id===+cid).reduce((s,o)=>s+(o.quantity||0),0);
+  const deliveryChU   = cachedChannels.find(c => c.name === '配達');
+  const colBentoSum   = (deliveryChU && deliveryChU.id === +cid)
+    ? cachedBentoOrders.reduce((s,o)=>s+(o.quantity||0),0) : 0;
   const ctEl = document.getElementById(`ct_actual_${cid}`);
-  if (ctEl) ctEl.textContent = (colInputSum+colDxSum)||'';
+  if (ctEl) ctEl.textContent = (colInputSum+colDxSum+colBentoSum)||'';
 
-  // 全体合計（dx 注文も加算）
+  // 全体合計（dx 店頭注文・bento 注文も加算）
   const allInputs = document.querySelectorAll('table input[data-pid][data-cid]');
   const grandInput = Array.from(allInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
-  const grandDx = cachedInstoreOrders.reduce((s,o)=>s+(o.quantity||0),0);
+  const grandDx    = cachedInstoreOrders.reduce((s,o)=>s+(o.quantity||0),0);
+  const grandBento = cachedBentoOrders.reduce((s,o)=>s+(o.quantity||0),0);
   const gaEl = document.getElementById('grand_actual');
-  if (gaEl) gaEl.textContent = (grandInput+grandDx)||'';
+  if (gaEl) gaEl.textContent = (grandInput+grandDx+grandBento)||'';
   updateRiceCalc();
 }
 
@@ -1319,7 +1331,7 @@ async function renderReportPage() {
     if (p.category !== lastCat) {
       if (lastCat === '弁当') {
         matrixBody += buildInstoreOrderRows(channels, 'report');
-        matrixBody += buildBentoOrdersTable(reportColspan);
+        matrixBody += buildBentoOrderRows(channels, 'report');
       }
       matrixBody += `<tr><td class="fw-bold" colspan="${3+channels.length}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ ${p.category}</td></tr>`;
       lastCat = p.category;
@@ -1345,15 +1357,18 @@ async function renderReportPage() {
   });
   if (lastCat === '弁当') {
     matrixBody += buildInstoreOrderRows(channels, 'report');
-    matrixBody += buildBentoOrdersTable(reportColspan);
-  } else if (!bentoVisited && cachedInstoreOrders.length) {
-    // 当日 master の弁当売上ゼロだが dx 注文がある場合のフォールバック
+    matrixBody += buildBentoOrderRows(channels, 'report');
+  } else if (!bentoVisited && (cachedInstoreOrders.length || cachedBentoOrders.length)) {
+    // 当日 master の弁当売上ゼロだが 注文がある場合のフォールバック
     matrixBody += `<tr><td class="fw-bold" colspan="${3+channels.length}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ 弁当</td></tr>`;
     matrixBody += buildInstoreOrderRows(channels, 'report');
+    matrixBody += buildBentoOrderRows(channels, 'report');
   }
-  // dx 店頭注文は明細としては表示するが、matrix 合計には加算しない（月次・年次と揃え、注文売上 KPI で別表示）
-  const instoreSales = cachedInstoreOrders.reduce((s,o)=>s+Math.round(o.quantity||0)*Math.round(o.price||0), 0);
-  const instoreQty   = cachedInstoreOrders.reduce((s,o)=>s+Math.round(o.quantity||0), 0);
+  // dx 店頭注文 + bento 注文は明細として表示。matrix 合計には加算せず、注文売上 KPI で別表示
+  const instoreSales = cachedInstoreOrders.reduce((s,o)=>s+Math.round(o.quantity||0)*Math.round(o.price||0), 0)
+                     + cachedBentoOrders.reduce((s,o)=>s+Math.round(o.quantity||0)*Math.round(o.price||0), 0);
+  const instoreQty   = cachedInstoreOrders.reduce((s,o)=>s+Math.round(o.quantity||0), 0)
+                     + cachedBentoOrders.reduce((s,o)=>s+Math.round(o.quantity||0), 0);
   const totalCells = channels.map(c=>`<td class="text-right fw-bold" style="background:#E8F0E8">${chQtyTotals[c.id]||'―'}</td>`).join('');
   const amtCells   = channels.map(c=>`<td class="text-right fw-bold" style="background:#F0F7F0;color:#2E7D32">${chTotals[c.id]?fmt(chTotals[c.id]):'―'}</td>`).join('');
   matrixBody += `<tr style="background:var(--surface2)">

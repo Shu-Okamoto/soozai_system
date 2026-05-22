@@ -650,12 +650,29 @@ def generate_daily_report(date_str):
 def monthly_summary():
     ym   = request.args.get('month')
     rows = sb.table('hq_daily_reports').select('*').like('date',ym+'%').order('date').execute().data
-    # dx 店頭注文を期間集計（営業日と独立。daily_report 未生成の日も拾う）
+    # 注文売上を期間集計（dx 店頭注文 + bento システム注文）。営業日と独立で daily_report 未生成日も拾う
     instore_rows = sb.table('hq_instore_orders').select('date,quantity,price').like('date',ym+'%').execute().data
     instore_by_date = {}
     for r in instore_rows:
         amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
         instore_by_date[r['date']] = instore_by_date.get(r['date'],0) + amt
+    # bento システムの orders を月内範囲で取得（product_id 経由で price を引く）
+    try:
+        bento_orders = sb.table('orders').select('delivery_date,product_id,quantity,status')\
+            .like('delivery_date',ym+'%').eq('status','active').execute().data
+    except Exception:
+        bento_orders = []
+    if bento_orders:
+        bento_pids = list({o['product_id'] for o in bento_orders if o.get('product_id')})
+        try:
+            bento_prods = sb.table('products').select('id,price').in_('id', bento_pids).execute().data
+        except Exception:
+            bento_prods = []
+        bp_price = {p['id']: int(round(float(p.get('price') or 0))) for p in bento_prods}
+        for o in bento_orders:
+            d   = o.get('delivery_date')
+            amt = int(round(float(o.get('quantity') or 0))) * bp_price.get(o.get('product_id'), 0)
+            if d: instore_by_date[d] = instore_by_date.get(d,0) + amt
     total_instore = sum(instore_by_date.values())
     if not rows:
         return jsonify({'month':ym,'days':[],'summary':{'total_instore_sales':total_instore}})
@@ -681,7 +698,7 @@ def monthly_summary():
 def yearly_summary():
     year = request.args.get('year')
     rows = sb.table('hq_daily_reports').select('*').like('date',year+'%').order('date').execute().data
-    # dx 店頭注文を月別集計
+    # 注文売上を月別集計（dx 店頭注文 + bento システム注文）
     instore_rows = sb.table('hq_instore_orders').select('date,quantity,price').like('date',year+'%').execute().data
     instore_by_month = {}
     for r in instore_rows:
@@ -689,6 +706,22 @@ def yearly_summary():
         if not m: continue
         amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
         instore_by_month[m] = instore_by_month.get(m,0) + amt
+    try:
+        bento_orders = sb.table('orders').select('delivery_date,product_id,quantity,status')\
+            .like('delivery_date',year+'%').eq('status','active').execute().data
+    except Exception:
+        bento_orders = []
+    if bento_orders:
+        bento_pids = list({o['product_id'] for o in bento_orders if o.get('product_id')})
+        try:
+            bento_prods = sb.table('products').select('id,price').in_('id', bento_pids).execute().data
+        except Exception:
+            bento_prods = []
+        bp_price = {p['id']: int(round(float(p.get('price') or 0))) for p in bento_prods}
+        for o in bento_orders:
+            m   = (o.get('delivery_date') or '')[:7]
+            amt = int(round(float(o.get('quantity') or 0))) * bp_price.get(o.get('product_id'), 0)
+            if m: instore_by_month[m] = instore_by_month.get(m,0) + amt
     total_instore = sum(instore_by_month.values())
     if not rows:
         return jsonify({'year':year,'months':[],'summary':{'total_instore_sales':total_instore}})
@@ -784,17 +817,20 @@ def get_bento_orders():
 
     offices  = safe_in('offices',  office_ids)
     members  = safe_in('members',  member_ids)
-    products = safe_in('products', product_ids)
+    products = safe_in('products', product_ids, fields='id,name,price,category')
 
     result = []
     for o in orders:
+        prod = products.get(o.get('product_id'), {})
         result.append({
             'id':             o['id'],
             'delivery_date':  o['delivery_date'],
             'office_name':    offices.get(o.get('office_id'),  {}).get('name', ''),
             'member_name':    members.get(o.get('member_id'),  {}).get('name', ''),
-            'product_name':   products.get(o.get('product_id'),{}).get('name', ''),
-            'quantity':       o.get('quantity', 0),
+            'product_name':   prod.get('name', ''),
+            'price':          int(round(float(prod.get('price') or 0))),
+            'category':       prod.get('category') or '弁当',
+            'quantity':       int(o.get('quantity') or 0),
             'payment_method': o.get('payment_method', ''),
             'note':           o.get('note', ''),
         })
