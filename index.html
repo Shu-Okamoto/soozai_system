@@ -345,27 +345,49 @@ function buildInstoreOrderRows(channels, mode) {
 
 // 注文弁当（bento システム）の行HTMLを返す。dx と同じく matrix 内に行追加（配達チャネル列に数量）
 // mode: 'plan' | 'actual' | 'report'
+// 仕様：
+//   - フリー会員（is_free_member=true）：表示は member_name 様、グループキーは member_id|product_name
+//   - それ以外：表示は office_name 様、グループキーは office_id|product_name
+//   - 同一グループの行は数量を加算して 1 行にまとめる
 function buildBentoOrderRows(channels, mode) {
   if (!Array.isArray(cachedBentoOrders) || !cachedBentoOrders.length) return '';
   const deliveryCh = channels.find(c => c.name === '配達');
   if (!deliveryCh) return '';  // 配達チャネル未登録時は表示できないのでスキップ
-  return cachedBentoOrders.map(o => {
-    const qty   = Math.round(o.quantity || 0);
-    const price = Math.round(o.price    || 0);
-    const amt   = qty * price;
+
+  // グルーピング
+  const groups = new Map();
+  cachedBentoOrders.forEach(o => {
+    const isFree = !!o.is_free_member;
+    const displayName = isFree ? (o.member_name || '') : (o.office_name || '');
+    const keyId = isFree ? (o.member_id || '') : (o.office_id || '');
+    const key = `${keyId}|${o.product_name || ''}`;
+    const prev = groups.get(key);
+    if (prev) {
+      prev.quantity += Math.round(o.quantity || 0);
+    } else {
+      groups.set(key, {
+        product_name: o.product_name || '',
+        display_name: displayName,
+        price:        Math.round(o.price || 0),
+        quantity:     Math.round(o.quantity || 0),
+      });
+    }
+  });
+
+  return Array.from(groups.values()).map(g => {
+    const amt = g.quantity * g.price;
     const channelCells = channels.map(ch => {
-      const v = (ch.id === deliveryCh.id) ? qty : 0;
+      const v = (ch.id === deliveryCh.id) ? g.quantity : 0;
       return `<td class="text-center" style="background:#FFF8E1;color:#E65100">${v || ''}</td>`;
     }).join('');
-    const nameSuffix = [o.office_name, o.member_name].filter(Boolean).join(' ');
-    const nameCell  = `<td class="left" style="white-space:nowrap;color:#E65100;background:#FFFDE7">${o.product_name||''}（${nameSuffix?nameSuffix+'様':''}）</td>`;
-    const priceCell = `<td style="background:#FFFDE7;color:var(--text2);white-space:nowrap">¥${price.toLocaleString()}</td>`;
+    const nameCell  = `<td class="left" style="white-space:nowrap;color:#E65100;background:#FFFDE7">${g.product_name}（${g.display_name?g.display_name+'様':''}）</td>`;
+    const priceCell = `<td style="background:#FFFDE7;color:var(--text2);white-space:nowrap">¥${g.price.toLocaleString()}</td>`;
     let tailCells;
     if (mode === 'report') {
-      tailCells = `<td class="text-right fw-bold" style="background:#F5F5F5">${qty||'―'}</td>
+      tailCells = `<td class="text-right fw-bold" style="background:#F5F5F5">${g.quantity||'―'}</td>
         <td class="text-right fw-bold" style="background:#F0F7F0">${amt?fmt(amt):'―'}</td>`;
     } else {
-      tailCells = `<td class="fw-bold text-center" style="background:#F0F7F0">${qty||''}</td>`;
+      tailCells = `<td class="fw-bold text-center" style="background:#F0F7F0">${g.quantity||''}</td>`;
     }
     return `<tr data-bento-row="1" style="background:#FFFDE7">${nameCell}${priceCell}${channelCells}${tailCells}</tr>`;
   }).join('');

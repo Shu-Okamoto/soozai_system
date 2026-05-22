@@ -846,14 +846,22 @@ def get_bento_orders():
     def _prod_name(prod):
         return prod.get('name') or prod.get('product_name') or ''
 
+    FREE_OFFICE_ID = '19ab2b37-f610-46f7-b050-ce6bf3f8037e'
     result = []
     for o in orders:
         prod = products.get(o.get('product_id'), {})
+        office_id   = o.get('office_id')
+        member_id   = o.get('member_id')
+        office_name = offices.get(office_id, {}).get('name', '')
+        is_free     = (office_id == FREE_OFFICE_ID) or (office_name == 'フリー会員')
         result.append({
             'id':             o['id'],
             'delivery_date':  o['delivery_date'],
-            'office_name':    offices.get(o.get('office_id'),  {}).get('name', ''),
-            'member_name':    members.get(o.get('member_id'),  {}).get('name', ''),
+            'office_id':      office_id,
+            'office_name':    office_name,
+            'member_id':      member_id,
+            'member_name':    members.get(member_id, {}).get('name', ''),
+            'is_free_member': is_free,
             'product_name':   _prod_name(prod),
             'price':          _prod_price(prod),
             'category':       prod.get('category') or '弁当',
