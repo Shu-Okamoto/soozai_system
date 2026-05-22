@@ -665,10 +665,17 @@ def monthly_summary():
     if bento_orders:
         bento_pids = list({o['product_id'] for o in bento_orders if o.get('product_id')})
         try:
-            bento_prods = sb.table('products').select('id,price').in_('id', bento_pids).execute().data
+            bento_prods = sb.table('products').select('*').in_('id', bento_pids).execute().data
         except Exception:
             bento_prods = []
-        bp_price = {p['id']: int(round(float(p.get('price') or 0))) for p in bento_prods}
+        def _bp_price(p):
+            for k in ('price','unit_price'):
+                v = p.get(k)
+                if v is not None:
+                    try:    return int(round(float(v)))
+                    except: pass
+            return 0
+        bp_price = {p['id']: _bp_price(p) for p in bento_prods}
         for o in bento_orders:
             d   = o.get('delivery_date')
             amt = int(round(float(o.get('quantity') or 0))) * bp_price.get(o.get('product_id'), 0)
@@ -714,10 +721,17 @@ def yearly_summary():
     if bento_orders:
         bento_pids = list({o['product_id'] for o in bento_orders if o.get('product_id')})
         try:
-            bento_prods = sb.table('products').select('id,price').in_('id', bento_pids).execute().data
+            bento_prods = sb.table('products').select('*').in_('id', bento_pids).execute().data
         except Exception:
             bento_prods = []
-        bp_price = {p['id']: int(round(float(p.get('price') or 0))) for p in bento_prods}
+        def _bp_price(p):
+            for k in ('price','unit_price'):
+                v = p.get(k)
+                if v is not None:
+                    try:    return int(round(float(v)))
+                    except: pass
+            return 0
+        bp_price = {p['id']: _bp_price(p) for p in bento_prods}
         for o in bento_orders:
             m   = (o.get('delivery_date') or '')[:7]
             amt = int(round(float(o.get('quantity') or 0))) * bp_price.get(o.get('product_id'), 0)
@@ -817,7 +831,20 @@ def get_bento_orders():
 
     offices  = safe_in('offices',  office_ids)
     members  = safe_in('members',  member_ids)
-    products = safe_in('products', product_ids, fields='id,name,price,category')
+    # products は price / category のカラム名揺れに耐えるよう全カラム取得
+    products = safe_in('products', product_ids, fields='*')
+
+    def _prod_price(prod):
+        # price / unit_price のどちらでも拾う
+        for k in ('price', 'unit_price'):
+            v = prod.get(k)
+            if v is not None:
+                try:    return int(round(float(v)))
+                except: pass
+        return 0
+
+    def _prod_name(prod):
+        return prod.get('name') or prod.get('product_name') or ''
 
     result = []
     for o in orders:
@@ -827,8 +854,8 @@ def get_bento_orders():
             'delivery_date':  o['delivery_date'],
             'office_name':    offices.get(o.get('office_id'),  {}).get('name', ''),
             'member_name':    members.get(o.get('member_id'),  {}).get('name', ''),
-            'product_name':   prod.get('name', ''),
-            'price':          int(round(float(prod.get('price') or 0))),
+            'product_name':   _prod_name(prod),
+            'price':          _prod_price(prod),
             'category':       prod.get('category') or '弁当',
             'quantity':       int(o.get('quantity') or 0),
             'payment_method': o.get('payment_method', ''),
