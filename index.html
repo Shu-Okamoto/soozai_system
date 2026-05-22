@@ -289,6 +289,7 @@ let cachedMembers       = [];
 let cachedCategories    = [];
 let cachedSubcategories = [];
 let cachedBentoOrders   = []; // 表示中ページの日付分のみ
+let cachedInstoreOrders = []; // dx 由来の店頭注文（表示中ページの日付分のみ）
 
 async function initData() {
   try {
@@ -308,6 +309,43 @@ async function initData() {
 async function loadBentoOrders(targetDate) {
   cachedBentoOrders = await fetch(`${API}/bento/orders?date=${targetDate}`).then(r=>r.json()).catch(()=>[]);
   if (!Array.isArray(cachedBentoOrders)) cachedBentoOrders = [];
+}
+
+async function loadInstoreOrders(targetDate) {
+  cachedInstoreOrders = await fetch(`${API}/instore/orders?date=${targetDate}`).then(r=>r.json()).catch(()=>[]);
+  if (!Array.isArray(cachedInstoreOrders)) cachedInstoreOrders = [];
+}
+
+// dx 店頭注文の行HTMLを返す（plan / actual / report 共通）
+// mode: 'plan' | 'actual' | 'report'
+function buildInstoreOrderRows(channels, mode) {
+  if (!Array.isArray(cachedInstoreOrders) || !cachedInstoreOrders.length) return '';
+  return cachedInstoreOrders.map(o => {
+    const qty   = o.quantity || 0;
+    const price = o.price    || 0;
+    const amt   = qty * price;
+    const channelCells = channels.map(ch => {
+      const v = (o.store_id === ch.id) ? qty : 0;
+      return `<td class="text-center" style="background:#FFF8E1;color:#E65100">${v || ''}</td>`;
+    }).join('');
+    const nameCell  = `<td class="left" style="white-space:nowrap;color:#E65100;background:#FFFDE7">${o.product_name||''}（${o.customer_name||''}）</td>`;
+    const priceCell = `<td style="background:#FFFDE7;color:var(--text2);white-space:nowrap">¥${price.toLocaleString()}</td>`;
+    let tailCells;
+    if (mode === 'report') {
+      tailCells = `<td class="text-right fw-bold" style="background:#F5F5F5">${qty||'―'}</td>
+        <td class="text-right fw-bold" style="background:#F0F7F0">${amt?fmt(amt):'―'}</td>`;
+    } else {
+      // plan / actual: 合計列のみ
+      tailCells = `<td class="fw-bold text-center" style="background:#F0F7F0">${qty||''}</td>`;
+    }
+    return `<tr data-dx-row="1" style="background:#FFFDE7">${nameCell}${priceCell}${channelCells}${tailCells}</tr>`;
+  }).join('');
+}
+
+// dx 注文を商品名でマスタにマッチさせて pid を返す（マッチしなければ null）
+function matchInstoreProductId(productName) {
+  const p = cachedProducts.find(p=>p.name===productName);
+  return p ? p.id : null;
 }
 
 // 注文弁当の別表HTMLを返す（colspan指定）
@@ -436,9 +474,7 @@ async function renderPlanPage() {
 
   const plans = await fetch(`${API}/shipping-plans?date_from=${days[0]}&date_to=${days[5]}`).then(r=>r.json()).catch(()=>[]);
   await loadBentoOrders(todayDate);
-  // dx 連携：店頭注文（読み取り専用で 弁当 カテゴリ末尾に表示）
-  const instoreOrders = await fetch(`${API}/instore/orders?date=${todayDate}`).then(r=>r.json()).catch(()=>[]);
-  const instoreOrdersList = Array.isArray(instoreOrders) ? instoreOrders : [];
+  await loadInstoreOrders(todayDate);
 
   // planMap[date][product_id][channel_id] = qty
   const planMap = {};
@@ -478,31 +514,20 @@ async function renderPlanPage() {
         </tr>`;
       });
       if (cat === '弁当') {
-        // dx 由来の店頭注文を 弁当 末尾に read-only 行で表示
-        instoreOrdersList.forEach(o => {
-          const cells = chs.map(ch => {
-            const qty = (o.store_id === ch.id) ? (o.quantity || 0) : '';
-            return `<td class="text-center" style="color:var(--text2);background:#FFF8E1">${qty || ''}</td>`;
-          }).join('');
-          body += `<tr style="background:#FFFDE7">
-            <td class="left" style="white-space:nowrap;color:#E65100">【注文】${o.product_name}（${o.customer_name||''}）</td>
-            <td style="color:var(--text3);font-size:16px;white-space:nowrap">¥${(o.price||0).toLocaleString()}</td>
-            ${cells}
-            <td class="fw-bold" style="background:#F0F7F0">${o.quantity||''}</td>
-          </tr>`;
-        });
+        // dx 由来の店頭注文を 弁当 末尾に read-only 行で表示（行追加方式）
+        body += buildInstoreOrderRows(chs, 'plan');
         body += buildBentoOrdersTable(planColspan);
       }
     });
 
     // 列合計行（dx 注文も加算）
-    const instoreColSum = ch => instoreOrdersList.filter(o=>o.store_id===ch.id).reduce((s,o)=>s+(o.quantity||0),0);
+    const instoreColSum = ch => cachedInstoreOrders.filter(o=>o.store_id===ch.id).reduce((s,o)=>s+(o.quantity||0),0);
     const colTotals = chs.map(ch=>{
       const t = prods.reduce((s,p)=>s+(planMap[targetDate]?.[p.id]?.[ch.id]||0),0) + instoreColSum(ch);
       return `<td class="fw-bold" style="background:#E8F0E8" id="ct_${ch.id}_${targetDate}">${t||''}</td>`;
     }).join('');
     const grandTotal = chs.reduce((s,ch)=>s+prods.reduce((ss,p)=>ss+(planMap[targetDate]?.[p.id]?.[ch.id]||0),0),0)
-                     + instoreOrdersList.reduce((s,o)=>s+(o.quantity||0),0);
+                     + cachedInstoreOrders.reduce((s,o)=>s+(o.quantity||0),0);
     body += `<tr style="background:var(--surface2)">
       <td class="fw-bold left" colspan="2" style="font-size:12px">合　計</td>
       ${colTotals}
@@ -668,6 +693,20 @@ function updateRiceCalc() {
     if (tenpuraPids.has(pid))  tenpuraTotal  += v;
     if (nishimePids.has(pid))  nishimeTotal  += v;
   });
+  // dx 店頭注文の数量も加算（商品名でマスタ照合）
+  cachedInstoreOrders.forEach(o => {
+    const pid = matchInstoreProductId(o.product_name);
+    if (pid === null) return;
+    const v = o.quantity || 0;
+    if (ricePids.has(pid))     riceTotal     += v;
+    if (sansyokuPids.has(pid)) sansyokuTotal += v;
+    if (chirashiPids.has(pid)) chirashiTotal += v;
+    if (tamagoPids.has(pid))   tamagoTotal   += v;
+    if (saladPids.has(pid))    saladTotal    += v;
+    if (bentoPids.has(pid))    bentoTotal    += v;
+    if (tenpuraPids.has(pid))  tenpuraTotal  += v;
+    if (nishimePids.has(pid))  nishimeTotal  += v;
+  });
 
   function toSho(n) { return Math.ceil(n * 185 / 3600 * 10) / 10; }
   function set(id, val) { const el=document.getElementById(id); if(el) el.textContent=val; }
@@ -694,12 +733,13 @@ function updateRowTotal(inp) {
   const rowSum = Array.from(rowInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
   const rtEl = document.getElementById(`rt_${pid}_${date}`);
   if (rtEl) rtEl.textContent = rowSum || '';
-  // 列合計
+  // 列合計（dx 注文も加算）
   const cid = inp.dataset.cid;
   const colInputs = document.querySelectorAll(`#plan-table input[data-cid="${cid}"][data-date="${date}"]`);
-  const colSum = Array.from(colInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
+  const colInputSum = Array.from(colInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
+  const dxSum = cachedInstoreOrders.filter(o=>o.store_id===+cid).reduce((s,o)=>s+(o.quantity||0),0);
   const ctEl = document.getElementById(`ct_${cid}_${date}`);
-  if (ctEl) ctEl.textContent = colSum || '';
+  if (ctEl) ctEl.textContent = (colInputSum+dxSum) || '';
   updateRiceCalc();
 }
 
@@ -762,6 +802,7 @@ async function renderActualPage() {
     fetch(`${API}/daily-reports/${date}`).then(r=>r.json()).catch(()=>null)
   ]);
   await loadBentoOrders(date);
+  await loadInstoreOrders(date);
 
   // 当日の献立から商品IDを取得
   const dow = new Date(date).getDay() || 7; // 日=7(対象外), 月=1〜土=6
@@ -824,10 +865,15 @@ async function renderActualPage() {
         <td class="fw-bold" style="background:#F0F7F0;text-align:center" id="at_${p.id}">${actualTotal||''}</td>
       </tr>`;
     });
-    if (cat === '弁当') tableBody += buildBentoOrdersTable(actualColspan);
+    if (cat === '弁当') {
+      // dx 店頭注文を 弁当 末尾に行追加（read-only）
+      tableBody += buildInstoreOrderRows(chs, 'actual');
+      tableBody += buildBentoOrdersTable(actualColspan);
+    }
   });
 
-  const actColTotals = chs.map(ch=>prods.reduce((s,p)=>s+(actualMap[p.id]?.[ch.id]||0),0));
+  const instoreColSum = ch => cachedInstoreOrders.filter(o=>o.store_id===ch.id).reduce((s,o)=>s+(o.quantity||0),0);
+  const actColTotals = chs.map(ch=>prods.reduce((s,p)=>s+(actualMap[p.id]?.[ch.id]||0),0) + instoreColSum(ch));
   const actGrand = actColTotals.reduce((s,v)=>s+v,0);
 
   tableBody += `
@@ -966,17 +1012,19 @@ function updateActualTotals(inp) {
   const atEl = document.getElementById(`at_${pid}`);
   if (atEl) atEl.textContent = rowActual||'';
 
-  // 列合計
+  // 列合計（dx 注文も加算）
   const colInputs = document.querySelectorAll(`table input[data-cid="${cid}"]`);
-  const colSum = Array.from(colInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
+  const colInputSum = Array.from(colInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
+  const colDxSum = cachedInstoreOrders.filter(o=>o.store_id===+cid).reduce((s,o)=>s+(o.quantity||0),0);
   const ctEl = document.getElementById(`ct_actual_${cid}`);
-  if (ctEl) ctEl.textContent = colSum||'';
+  if (ctEl) ctEl.textContent = (colInputSum+colDxSum)||'';
 
-  // 全体合計
+  // 全体合計（dx 注文も加算）
   const allInputs = document.querySelectorAll('table input[data-pid][data-cid]');
-  const grandAct = Array.from(allInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
+  const grandInput = Array.from(allInputs).reduce((s,el)=>s+(parseInt(el.value)||0),0);
+  const grandDx = cachedInstoreOrders.reduce((s,o)=>s+(o.quantity||0),0);
   const gaEl = document.getElementById('grand_actual');
-  if (gaEl) gaEl.textContent = grandAct||'';
+  if (gaEl) gaEl.textContent = (grandInput+grandDx)||'';
   updateRiceCalc();
 }
 
@@ -1218,6 +1266,7 @@ async function renderReportPage() {
   const date = currentDate;
   const r = await fetch(`${API}/daily-reports/${date}`).then(res=>res.json()).catch(()=>null);
   await loadBentoOrders(date);
+  await loadInstoreOrders(date);
 
   if (!r || !r.total_sales) {
     document.getElementById('content').innerHTML = `
@@ -1255,13 +1304,18 @@ async function renderReportPage() {
   let grandTotal = 0, grandQty = 0;
   let matrixBody = '';
   let lastCat = null;
+  let bentoVisited = false;
   const reportColspan = 4+channels.length;
   allPids.forEach(pid => {
     const p = prodInfo[pid];
     if (p.category !== lastCat) {
-      if (lastCat === '弁当') matrixBody += buildBentoOrdersTable(reportColspan);
+      if (lastCat === '弁当') {
+        matrixBody += buildInstoreOrderRows(channels, 'report');
+        matrixBody += buildBentoOrdersTable(reportColspan);
+      }
       matrixBody += `<tr><td class="fw-bold" colspan="${3+channels.length}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ ${p.category}</td></tr>`;
       lastCat = p.category;
+      if (p.category === '弁当') bentoVisited = true;
     }
     let rowAmt = 0, rowQty = 0;
     const cells = channels.map(c => {
@@ -1281,7 +1335,23 @@ async function renderReportPage() {
       <td class="text-right fw-bold" style="background:#F0F7F0">${rowAmt ? fmt(rowAmt) : '―'}</td>
     </tr>`;
   });
-  if (lastCat === '弁当') matrixBody += buildBentoOrdersTable(reportColspan);
+  if (lastCat === '弁当') {
+    matrixBody += buildInstoreOrderRows(channels, 'report');
+    matrixBody += buildBentoOrdersTable(reportColspan);
+  } else if (!bentoVisited && cachedInstoreOrders.length) {
+    // 当日 master の弁当売上ゼロだが dx 注文がある場合のフォールバック
+    matrixBody += `<tr><td class="fw-bold" colspan="${3+channels.length}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ 弁当</td></tr>`;
+    matrixBody += buildInstoreOrderRows(channels, 'report');
+  }
+  // dx 店頭注文を合計に加算（マトリクス末尾の列合計／総合計に反映）
+  cachedInstoreOrders.forEach(o => {
+    const qty = o.quantity || 0;
+    const amt = qty * (o.price || 0);
+    if (chTotals[o.store_id]    !== undefined) chTotals[o.store_id]    += amt;
+    if (chQtyTotals[o.store_id] !== undefined) chQtyTotals[o.store_id] += qty;
+    grandTotal += amt;
+    grandQty   += qty;
+  });
   const totalCells = channels.map(c=>`<td class="text-right fw-bold" style="background:#E8F0E8">${chQtyTotals[c.id]||'―'}</td>`).join('');
   const amtCells   = channels.map(c=>`<td class="text-right fw-bold" style="background:#F0F7F0;color:#2E7D32">${chTotals[c.id]?fmt(chTotals[c.id]):'―'}</td>`).join('');
   matrixBody += `<tr style="background:var(--surface2)">
@@ -1583,6 +1653,7 @@ async function renderMonthlyPage() {
       <td>${d.date.slice(5)}（${dow}）</td>
       <td>${d.weather||'―'}</td>
       <td class="text-right">${fmt(d.total_sales)}</td>
+      <td class="text-right" style="color:#E65100">${d.instore_sales?fmt(d.instore_sales):'―'}</td>
       <td class="text-right">${fmt(d.west_sales)}</td>
       <td class="text-right">${fmt(d.south_sales)}</td>
       <td class="text-right">${fmt(d.other_sales)}</td>
@@ -1602,6 +1673,7 @@ async function renderMonthlyPage() {
 
     <div class="kpi-grid">
       <div class="kpi"><div class="kpi-label">合計売上</div><div class="kpi-value green">${fmt(s.total_sales)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">注文売上</div><div class="kpi-value" style="color:#E65100">${fmt(s.total_instore_sales||0)}</div><div class="kpi-sub">円（dx 取込）</div></div>
       <div class="kpi"><div class="kpi-label">合計利益</div><div class="kpi-value ${s.total_profit>=0?'green':'red'}">${fmt(s.total_profit)}</div><div class="kpi-sub">円　利益率 ${s.profit_rate}%</div></div>
       <div class="kpi"><div class="kpi-label">人件費計</div><div class="kpi-value warn">${fmt(s.total_labor)}</div><div class="kpi-sub">円　人件費率 ${s.labor_rate}%</div></div>
       <div class="kpi"><div class="kpi-label">営業日数</div><div class="kpi-value">${s.op_days}</div><div class="kpi-sub">日</div></div>
@@ -1619,7 +1691,7 @@ async function renderMonthlyPage() {
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>日付</th><th>天気</th><th>売上</th><th>西店</th><th>南店</th><th>その他</th>
+            <th>日付</th><th>天気</th><th>売上</th><th style="color:#E65100">注文</th><th>西店</th><th>南店</th><th>その他</th>
             <th>人件費</th><th>差引</th><th>人時売</th><th>総人時</th>
           </tr></thead>
           <tbody>${dayRows}</tbody>
@@ -1627,6 +1699,7 @@ async function renderMonthlyPage() {
             <td class="left">合計</td>
             <td>―</td>
             <td class="text-right">${fmt(s.total_sales)}</td>
+            <td class="text-right" style="color:#E65100">${fmt(s.total_instore_sales||0)}</td>
             <td class="text-right">${fmt(s.west_sales)}</td>
             <td class="text-right">${fmt(s.south_sales)}</td>
             <td class="text-right">${fmt(s.other_sales)}</td>
@@ -1662,6 +1735,7 @@ async function renderYearlyPage() {
       <td>${monthLabel(m.month)}</td>
       <td class="text-right">${m.op_days}</td>
       <td class="text-right">${fmt(m.total_sales)}</td>
+      <td class="text-right" style="color:#E65100">${m.instore_sales?fmt(m.instore_sales):'―'}</td>
       <td class="text-right">${fmt(m.west_sales)}</td>
       <td class="text-right">${fmt(m.south_sales)}</td>
       <td class="text-right">${fmt(m.other_sales)}</td>
@@ -1680,6 +1754,7 @@ async function renderYearlyPage() {
 
     <div class="kpi-grid">
       <div class="kpi"><div class="kpi-label">年間売上</div><div class="kpi-value green">${fmt(s.total_sales)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">注文売上</div><div class="kpi-value" style="color:#E65100">${fmt(s.total_instore_sales||0)}</div><div class="kpi-sub">円（dx 取込）</div></div>
       <div class="kpi"><div class="kpi-label">年間利益</div><div class="kpi-value ${s.total_profit>=0?'green':'red'}">${fmt(s.total_profit)}</div><div class="kpi-sub">円　利益率 ${s.profit_rate}%</div></div>
       <div class="kpi"><div class="kpi-label">人件費計</div><div class="kpi-value warn">${fmt(s.total_labor)}</div><div class="kpi-sub">円　人件費率 ${s.labor_rate}%</div></div>
       <div class="kpi"><div class="kpi-label">営業日数</div><div class="kpi-value">${s.op_days}</div><div class="kpi-sub">日</div></div>
@@ -1697,7 +1772,7 @@ async function renderYearlyPage() {
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>月</th><th>営業日</th><th>売上</th><th>西店</th><th>南店</th><th>その他</th>
+            <th>月</th><th>営業日</th><th>売上</th><th style="color:#E65100">注文</th><th>西店</th><th>南店</th><th>その他</th>
             <th>人件費</th><th>利益</th><th>利益率</th><th>人時売</th>
           </tr></thead>
           <tbody>${monthRows}</tbody>
@@ -1705,6 +1780,7 @@ async function renderYearlyPage() {
             <td class="left">合計</td>
             <td class="text-right">${s.op_days}</td>
             <td class="text-right">${fmt(s.total_sales)}</td>
+            <td class="text-right" style="color:#E65100">${fmt(s.total_instore_sales||0)}</td>
             <td class="text-right">${fmt(s.west_sales)}</td>
             <td class="text-right">${fmt(s.south_sales)}</td>
             <td class="text-right">${fmt(s.other_sales)}</td>
