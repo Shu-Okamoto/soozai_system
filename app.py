@@ -830,10 +830,11 @@ def get_instore_orders():
         return jsonify(_normalize(rows))
 
     # 当日以降 → dx から取得して mirror（sb_dx は dx 専用クライアント）
+    # status='active' のみ取り込み（cancelled 等は除外）
     try:
         dx_orders = sb_dx.table(DX_INSTORE_TABLE)\
-            .select(f'id,storeId,productName,quantity,customerName,{DX_DATE_COL}')\
-            .eq(DX_DATE_COL, target_date).execute().data
+            .select(f'id,storeId,productName,quantity,customerName,status,{DX_DATE_COL}')\
+            .eq(DX_DATE_COL, target_date).eq('status','active').execute().data
     except Exception as e:
         # dx 接続失敗時は hq のキャッシュにフォールバック
         rows = sb.table('hq_instore_orders').select('*').eq('date',target_date).order('id').execute().data
@@ -865,6 +866,13 @@ def get_instore_orders():
             'category':      p.get('category') or '弁当',
             'source_id':     source_id,
         })
+    # 既存キャッシュのうち、今回の active セットに無いもの（＝dx 側で cancelled/削除済）を除去
+    existing = sb.table('hq_instore_orders').select('source_id').eq('date',target_date).execute().data
+    active_ids = {r['source_id'] for r in mirror_rows}
+    stale_ids  = [r['source_id'] for r in existing if r.get('source_id') not in active_ids]
+    if stale_ids:
+        sb.table('hq_instore_orders').delete().in_('source_id', stale_ids).execute()
+
     if mirror_rows:
         sb.table('hq_instore_orders').upsert(mirror_rows, on_conflict='source_id').execute()
 
