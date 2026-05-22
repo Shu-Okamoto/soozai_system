@@ -878,12 +878,13 @@ async function renderActualPage() {
       <div class="card">
         <div class="card-header">
           <span class="card-title">出荷実績入力　${date}</span>
-          <div class="no-print" style="display:flex;gap:8px;align-items:center">
+          <div class="no-print" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <select id="add-prod-select" style="font-size:14px;min-height:36px">
               <option value="">― 商品を追加 ―</option>
               ${notShownProds.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}
             </select>
             <button class="btn btn-secondary btn-sm" onclick="addActualProductRow()">＋ 追加</button>
+            <button class="btn btn-primary btn-sm" onclick="openNewProductDialog()" ${isFinalized?'disabled':''}>✚ 新規商品</button>
           </div>
         </div>
         <div class="table-wrap">
@@ -985,34 +986,114 @@ function buildShiftRowHTML(name, hours, wage, plannedHours) {
   </div>`;
 }
 
+function appendActualProductRow(prod) {
+  const chs = cachedChannels;
+  const cells = chs.map(ch=>`<td style="padding:3px 5px">
+    <input type="number" min="0" value="" placeholder="0"
+      data-pid="${prod.id}" data-cid="${ch.id}"
+      style="width:80px;font-size:20px;text-align:center;padding:4px 2px"
+      oninput="updateActualTotals(this)">
+  </td>`).join('');
+  const priceCell = `<td style="padding:3px 5px;background:#FFFDE7">
+    <input type="number" min="0" value="${prod.price}" data-pid="${prod.id}" class="unit-price"
+      title="本日の単価（マスタは変更されません）"
+      style="width:72px;font-size:18px;text-align:right;padding:4px 2px"
+      onchange="dirty=true">
+  </td>`;
+  const newRow = document.createElement('tr');
+  newRow.innerHTML = `<td class="left" style="white-space:nowrap;font-weight:500;font-size:20px">${prod.name}</td>${priceCell}${cells}<td class="fw-bold" style="background:#F0F7F0;text-align:center" id="at_${prod.id}"></td>`;
+  const tbody = document.querySelector('#actual-table tbody');
+  const totalRow = tbody.querySelector('tr[data-total-row]');
+  if (totalRow) tbody.insertBefore(newRow, totalRow);
+  else tbody.appendChild(newRow);
+  updateRiceCalc();
+}
+
 function addActualProductRow() {
   const sel = document.getElementById('add-prod-select');
   const pid = parseInt(sel.value);
   if (!pid) return;
   const prod = cachedProducts.find(p=>p.id===pid);
   if (!prod) return;
-  const chs = cachedChannels;
-  const cells = chs.map(ch=>`<td style="padding:3px 5px">
-    <input type="number" min="0" value="" placeholder="0"
-      data-pid="${pid}" data-cid="${ch.id}"
-      style="width:80px;font-size:20px;text-align:center;padding:4px 2px"
-      oninput="updateActualTotals(this)">
-  </td>`).join('');
-  const priceCell = `<td style="padding:3px 5px;background:#FFFDE7">
-    <input type="number" min="0" value="${prod.price}" data-pid="${pid}" class="unit-price"
-      title="本日の単価（マスタは変更されません）"
-      style="width:72px;font-size:18px;text-align:right;padding:4px 2px"
-      onchange="dirty=true">
-  </td>`;
-  const newRow = document.createElement('tr');
-  newRow.innerHTML = `<td class="left" style="white-space:nowrap;font-weight:500;font-size:20px">${prod.name}</td>${priceCell}${cells}<td class="fw-bold" style="background:#F0F7F0;text-align:center" id="at_${pid}"></td>`;
-  const tbody = document.querySelector('#actual-table tbody');
-  const totalRow = tbody.querySelector('tr[data-total-row]');
-  if (totalRow) tbody.insertBefore(newRow, totalRow);
-  else tbody.appendChild(newRow);
+  appendActualProductRow(prod);
   sel.querySelector(`option[value="${pid}"]`).remove();
   sel.value = '';
-  updateRiceCalc();
+}
+
+function openNewProductDialog() {
+  const existing = document.getElementById('new-product-dialog');
+  if (existing) existing.remove();
+
+  const catOpts = getCatOrder().map(cat => {
+    const subs = getSubcats(cat);
+    if (subs.length) {
+      return `<optgroup label="${cat}">${subs.map(s=>`<option value="${cat}|${s}">${s}</option>`).join('')}</optgroup>`;
+    }
+    return `<optgroup label="${cat}"><option value="${cat}|">${cat}</option></optgroup>`;
+  }).join('');
+
+  const dialog = document.createElement('dialog');
+  dialog.id = 'new-product-dialog';
+  dialog.style.cssText = 'border:1px solid var(--border);border-radius:8px;padding:0;min-width:360px;background:var(--surface);color:var(--text)';
+  dialog.innerHTML = `
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border);font-weight:700;font-size:15px">✚ 新規商品を追加（商品マスタにも保存）</div>
+    <div style="padding:16px 18px;display:flex;flex-direction:column;gap:10px">
+      <div>
+        <label style="display:block;font-size:12px;color:var(--text3);margin-bottom:4px">品名</label>
+        <input type="text" id="np-name" placeholder="からあげ" style="width:100%;font-size:14px;padding:6px 8px">
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:var(--text3);margin-bottom:4px">価格（円）</label>
+        <input type="number" id="np-price" placeholder="200" min="0" style="width:100%;font-size:14px;padding:6px 8px">
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:var(--text3);margin-bottom:4px">分類・種別</label>
+        <select id="np-cat" style="width:100%;font-size:14px;padding:6px 8px">
+          <option value="">― 選択してください ―</option>
+          ${catOpts}
+        </select>
+      </div>
+    </div>
+    <div style="padding:10px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn btn-secondary btn-sm" onclick="closeNewProductDialog()">キャンセル</button>
+      <button class="btn btn-primary btn-sm" onclick="submitNewProductFromActual()">＋ 追加</button>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+  dialog.addEventListener('close', () => dialog.remove());
+  dialog.showModal();
+  document.getElementById('np-name').focus();
+}
+
+function closeNewProductDialog() {
+  document.getElementById('new-product-dialog')?.close();
+}
+
+async function submitNewProductFromActual() {
+  const name   = document.getElementById('np-name').value.trim();
+  const price  = parseInt(document.getElementById('np-price').value)||0;
+  const catVal = document.getElementById('np-cat').value;
+  if (!name)   { showToast('品名を入力してください',true); return; }
+  if (!catVal) { showToast('分類・種別を選択してください',true); return; }
+  if (cachedProducts.some(p=>p.name===name)) {
+    showToast('同じ品名がすでに存在します',true); return;
+  }
+  const [category, subcategory] = catVal.split('|');
+  const r = await fetch(`${API}/products`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name,price,category,subcategory})}).then(r=>r.json()).catch(()=>null);
+  if (!r?.ok) { showToast('追加失敗',true); return; }
+  cachedProducts = await fetch(API+'/products').then(r=>r.json());
+  const newProd = cachedProducts.find(p=>p.name===name);
+  closeNewProductDialog();
+  showToast('商品マスタに追加しました');
+  if (newProd) {
+    appendActualProductRow(newProd);
+    const sel = document.getElementById('add-prod-select');
+    if (sel) {
+      const opt = sel.querySelector(`option[value="${newProd.id}"]`);
+      if (opt) opt.remove();
+    }
+  }
 }
 
 function addShiftRowFromMaster() {
@@ -1392,6 +1473,7 @@ async function renderMenuPage() {
   document.getElementById('content').innerHTML = `
     <div class="no-print btn-group mb-16">
       <button class="btn btn-secondary btn-sm" onclick="gotoPrevWeekMenu('${mondayStr}')">◀ 前の週へ</button>
+      <button class="btn btn-secondary btn-sm" onclick="gotoNextWeekMenu('${mondayStr}')">次の週へ ▶</button>
       <button class="btn btn-primary" onclick="saveMenus('${mondayStr}')">💾 保存</button>
       <span class="text-muted" style="font-size:12px;align-self:center">${mondayStr} 〜 ${days[5]}</span>
       ${isAdmin ? `<button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="copyPrevWeekMenus('${mondayStr}')">📋 前の週の献立をコピー</button>` : ''}
@@ -1411,11 +1493,19 @@ async function renderMenuPage() {
 }
 
 function gotoPrevWeekMenu(currentMonday) {
+  shiftMenuWeek(currentMonday, -7);
+}
+
+function gotoNextWeekMenu(currentMonday) {
+  shiftMenuWeek(currentMonday, 7);
+}
+
+function shiftMenuWeek(currentMonday, deltaDays) {
   const d = new Date(currentMonday);
-  d.setDate(d.getDate() - 7);
-  const prev = d.toISOString().slice(0, 10);
-  currentDate = prev;
-  document.getElementById('global-date').value = prev;
+  d.setDate(d.getDate() + deltaDays);
+  const next = d.toISOString().slice(0, 10);
+  currentDate = next;
+  document.getElementById('global-date').value = next;
   renderMenuPage();
 }
 
