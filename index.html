@@ -97,7 +97,7 @@
   .alert{padding:11px 14px;border-radius:7px;font-size:15px;margin-bottom:12px}
   .alert-warn{background:var(--warn-light);color:var(--warn)}
   .loading{display:flex;align-items:center;justify-content:center;padding:48px;color:var(--text3)}
-  .spinner{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;margin-right:8px}
+  .spinner{width:18px;heigh:18px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;margin-right:8px}
   @keyframes spin{to{transform:rotate(360deg)}}
   .toast{position:fixed;bottom:20px;right:20px;background:#1A1A18;color:#fff;padding:13px 18px;border-radius:8px;font-size:15px;z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none;max-width:300px}
   .toast.show{opacity:1}
@@ -687,6 +687,33 @@ function updateRiceCalc() {
     if (bentoPids.has(pid))    bentoTotal    += v;
     if (tenpuraPids.has(pid))  tenpuraTotal  += v;
     if (nishimePids.has(pid))  nishimeTotal  += v;
+  });
+  // dx 注文：master 参照せず、product_name の文字列パターンから直接分類（ヒューリスティック）
+  cachedInstoreOrders.forEach(o => {
+    const name = o.product_name || '';
+    const cat  = o.category     || '弁当';
+    const v    = Math.round(o.quantity || 0);
+    if (!v) return;
+    const isSansyoku = name.includes('三色');
+    const isChirashi = name.includes('ちらし');
+    const isBento    = cat === '弁当' || name.includes('おかずセット');
+    const hasBigSize = name.includes('1500') || name.includes('2000') || name.includes('2500');
+    if (isSansyoku) sansyokuTotal += v;
+    else if (isChirashi) chirashiTotal += v;
+    else if (cat === '弁当') riceTotal += v;  // 三色/ちらし以外の弁当は白米扱い
+    if (cat === '弁当' &&
+        (name.includes('デラックス') || name.includes('1000') || name.includes('1200') || hasBigSize) &&
+        !name.includes('幕ノ内') && !name.includes('みかわ') && !isSansyoku) {
+      tamagoTotal += v;
+    }
+    if (isBento) saladTotal += v;  // サラダは弁当 count と同じ条件
+    if (isBento) bentoTotal += v;
+    if ((cat === '弁当' && !hasBigSize) || name.includes('おかずセット')) tenpuraTotal += v;
+    if (cat === '弁当' &&
+        (name.includes('煮しめ') || name.includes('作り1500円') ||
+         name.includes('2000円') || name.includes('2500円') || name.includes('3000円'))) {
+      nishimeTotal += v;
+    }
   });
 
   function toSho(n) { return Math.ceil(n * 185 / 3600 * 10) / 10; }
