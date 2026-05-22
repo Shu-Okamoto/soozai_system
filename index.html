@@ -328,7 +328,7 @@ function buildInstoreOrderRows(channels, mode) {
       const v = (o.store_id === ch.id) ? qty : 0;
       return `<td class="text-center" style="background:#FFF8E1;color:#E65100">${v || ''}</td>`;
     }).join('');
-    const nameCell  = `<td class="left" style="white-space:nowrap;color:#E65100;background:#FFFDE7">${o.product_name||''}（${o.customer_name||''}）</td>`;
+    const nameCell  = `<td class="left" style="white-space:nowrap;color:#E65100;background:#FFFDE7">${o.product_name||''}（${o.customer_name?o.customer_name+'様':''}）</td>`;
     const priceCell = `<td style="background:#FFFDE7;color:var(--text2);white-space:nowrap">¥${price.toLocaleString()}</td>`;
     let tailCells;
     if (mode === 'report') {

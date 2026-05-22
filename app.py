@@ -750,48 +750,53 @@ def print_shipping_plan():
             result['products'].append(row)
     return jsonify(result)
 
-# ─── 注文弁当（dx.InstoreOrder + dx.OrderProduct から弁当カテゴリのみ抽出）─────
-# 返却スキーマは /api/instore/orders と同じ：
-# date / store_id / product_name / customer_name / quantity / price / category
+# ─── 注文弁当（bento app 連携：orders/offices/members/products JOIN）────────────
+# 店頭注文 (/api/instore/orders) は dx 由来。こちらは別系統の bento システム由来で
+# office_name / member_name / payment_method / note などを返す。
 @app.route('/api/bento/orders', methods=['GET'])
 def get_bento_orders():
     """指定日(?date=YYYY-MM-DD)、または無指定なら明日以降の弁当注文を取得"""
     target_date = request.args.get('date')
     try:
-        q = sb_dx.table(DX_INSTORE_TABLE)\
-            .select(f'id,storeId,productName,quantity,customerName,{DX_DATE_COL}')
+        q = sb.table('orders').select('*')
         if target_date:
-            q = q.eq(DX_DATE_COL, target_date)
+            q = q.eq('delivery_date', target_date)
         else:
             tomorrow = (date.today() + timedelta(days=1)).isoformat()
-            q = q.gte(DX_DATE_COL, tomorrow)
-        dx_orders = q.order(DX_DATE_COL).execute().data
+            q = q.gte('delivery_date', tomorrow)
+        orders = q.order('delivery_date').order('created_at').execute().data
     except Exception as e:
         return jsonify({'error': f'orders取得失敗: {e}'}), 500
-    if not dx_orders:
+    if not orders:
         return jsonify([])
 
-    names = list({o['productName'] for o in dx_orders if o.get('productName')})
-    try:
-        dx_prods = sb_dx.table(DX_PRODUCT_TABLE)\
-            .select('productName,category,price').in_('productName', names).execute().data
-    except Exception:
-        dx_prods = []
-    prod_map = {p['productName']: p for p in dx_prods}
+    office_ids  = list({o['office_id']  for o in orders if o.get('office_id')})
+    member_ids  = list({o['member_id']  for o in orders if o.get('member_id')})
+    product_ids = list({o['product_id'] for o in orders if o.get('product_id')})
+
+    def safe_in(table, ids, fields='id,name'):
+        if not ids: return {}
+        try:
+            rows = sb.table(table).select(fields).in_('id', ids).execute().data
+            return {r['id']: r for r in rows}
+        except Exception:
+            return {}
+
+    offices  = safe_in('offices',  office_ids)
+    members  = safe_in('members',  member_ids)
+    products = safe_in('products', product_ids)
 
     result = []
-    for o in dx_orders:
-        p = prod_map.get(o.get('productName'), {})
-        if p.get('category') != '弁当':
-            continue
+    for o in orders:
         result.append({
-            'date':          o.get(DX_DATE_COL),
-            'store_id':      o.get('storeId'),
-            'product_name':  o.get('productName') or '',
-            'customer_name': o.get('customerName') or '',
-            'quantity':      int(o.get('quantity') or 0),
-            'price':         int(round(float(p.get('price') or 0))),
-            'category':      p.get('category') or '弁当',
+            'id':             o['id'],
+            'delivery_date':  o['delivery_date'],
+            'office_name':    offices.get(o.get('office_id'),  {}).get('name', ''),
+            'member_name':    members.get(o.get('member_id'),  {}).get('name', ''),
+            'product_name':   products.get(o.get('product_id'),{}).get('name', ''),
+            'quantity':       o.get('quantity', 0),
+            'payment_method': o.get('payment_method', ''),
+            'note':           o.get('note', ''),
         })
     return jsonify(result)
 
