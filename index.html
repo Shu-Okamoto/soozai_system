@@ -320,16 +320,18 @@ async function loadInstoreOrders(targetDate) {
 // mode: 'plan' | 'actual' | 'report'
 function buildInstoreOrderRows(channels, mode) {
   if (!Array.isArray(cachedInstoreOrders) || !cachedInstoreOrders.length) return '';
+  const numAlign   = mode === 'report' ? 'text-right' : 'text-center';
+  const priceAlign = mode === 'report' ? 'text-align:right' : '';
   return cachedInstoreOrders.map(o => {
     const qty   = Math.round(o.quantity || 0);
     const price = Math.round(o.price    || 0);
     const amt   = qty * price;
     const channelCells = channels.map(ch => {
       const v = (o.store_id === ch.id) ? qty : 0;
-      return `<td class="text-center" style="background:#FFF8E1;color:#E65100">${v || ''}</td>`;
+      return `<td class="${numAlign}" style="background:#FFF8E1;color:#E65100">${v || ''}</td>`;
     }).join('');
     const nameCell  = `<td class="left" style="white-space:nowrap;color:#E65100;background:#FFFDE7">${o.product_name||''}（${o.customer_name?o.customer_name+'様':''}）</td>`;
-    const priceCell = `<td style="background:#FFFDE7;color:var(--text2);white-space:nowrap">¥${price.toLocaleString()}</td>`;
+    const priceCell = `<td style="background:#FFFDE7;color:var(--text2);white-space:nowrap;${priceAlign}">¥${price.toLocaleString()}</td>`;
     let tailCells;
     if (mode === 'report') {
       tailCells = `<td class="text-right fw-bold" style="background:#F5F5F5">${qty||'―'}</td>
@@ -353,6 +355,8 @@ function buildBentoOrderRows(channels, mode) {
   if (!Array.isArray(cachedBentoOrders) || !cachedBentoOrders.length) return '';
   const deliveryCh = channels.find(c => c.name === '配達');
   if (!deliveryCh) return '';  // 配達チャネル未登録時は表示できないのでスキップ
+  const numAlign   = mode === 'report' ? 'text-right' : 'text-center';
+  const priceAlign = mode === 'report' ? 'text-align:right' : '';
 
   // グルーピング
   const groups = new Map();
@@ -378,10 +382,10 @@ function buildBentoOrderRows(channels, mode) {
     const amt = g.quantity * g.price;
     const channelCells = channels.map(ch => {
       const v = (ch.id === deliveryCh.id) ? g.quantity : 0;
-      return `<td class="text-center" style="background:#FFF8E1;color:#E65100">${v || ''}</td>`;
+      return `<td class="${numAlign}" style="background:#FFF8E1;color:#E65100">${v || ''}</td>`;
     }).join('');
     const nameCell  = `<td class="left" style="white-space:nowrap;color:#E65100;background:#FFFDE7">${g.product_name}（${g.display_name?g.display_name+'様':''}）</td>`;
-    const priceCell = `<td style="background:#FFFDE7;color:var(--text2);white-space:nowrap">¥${g.price.toLocaleString()}</td>`;
+    const priceCell = `<td style="background:#FFFDE7;color:var(--text2);white-space:nowrap;${priceAlign}">¥${g.price.toLocaleString()}</td>`;
     let tailCells;
     if (mode === 'report') {
       tailCells = `<td class="text-right fw-bold" style="background:#F5F5F5">${g.quantity||'―'}</td>
@@ -1386,11 +1390,29 @@ async function renderReportPage() {
     matrixBody += buildInstoreOrderRows(channels, 'report');
     matrixBody += buildBentoOrderRows(channels, 'report');
   }
-  // dx 店頭注文 + bento 注文は明細として表示。matrix 合計には加算せず、注文売上 KPI で別表示
-  const instoreSales = cachedInstoreOrders.reduce((s,o)=>s+Math.round(o.quantity||0)*Math.round(o.price||0), 0)
-                     + cachedBentoOrders.reduce((s,o)=>s+Math.round(o.quantity||0)*Math.round(o.price||0), 0);
-  const instoreQty   = cachedInstoreOrders.reduce((s,o)=>s+Math.round(o.quantity||0), 0)
-                     + cachedBentoOrders.reduce((s,o)=>s+Math.round(o.quantity||0), 0);
+  // dx 店頭注文 + bento 注文：matrix 合計（列合計・総合計）にも加算（行合計と整合させる）
+  const deliveryChForTotal = channels.find(c => c.name === '配達');
+  let instoreSales = 0, instoreQty = 0;
+  cachedInstoreOrders.forEach(o => {
+    const qty = Math.round(o.quantity || 0);
+    const amt = qty * Math.round(o.price || 0);
+    instoreSales += amt; instoreQty += qty;
+    if (chTotals[o.store_id]    !== undefined) chTotals[o.store_id]    += amt;
+    if (chQtyTotals[o.store_id] !== undefined) chQtyTotals[o.store_id] += qty;
+    grandTotal += amt;
+    grandQty   += qty;
+  });
+  cachedBentoOrders.forEach(o => {
+    const qty = Math.round(o.quantity || 0);
+    const amt = qty * Math.round(o.price || 0);
+    instoreSales += amt; instoreQty += qty;
+    if (deliveryChForTotal && chTotals[deliveryChForTotal.id] !== undefined) {
+      chTotals[deliveryChForTotal.id]    += amt;
+      chQtyTotals[deliveryChForTotal.id] += qty;
+    }
+    grandTotal += amt;
+    grandQty   += qty;
+  });
   const totalCells = channels.map(c=>`<td class="text-right fw-bold" style="background:#E8F0E8">${chQtyTotals[c.id]||'―'}</td>`).join('');
   const amtCells   = channels.map(c=>`<td class="text-right fw-bold" style="background:#F0F7F0;color:#2E7D32">${chTotals[c.id]?fmt(chTotals[c.id]):'―'}</td>`).join('');
   matrixBody += `<tr style="background:var(--surface2)">
