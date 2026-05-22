@@ -321,8 +321,8 @@ async function loadInstoreOrders(targetDate) {
 function buildInstoreOrderRows(channels, mode) {
   if (!Array.isArray(cachedInstoreOrders) || !cachedInstoreOrders.length) return '';
   return cachedInstoreOrders.map(o => {
-    const qty   = o.quantity || 0;
-    const price = o.price    || 0;
+    const qty   = Math.round(o.quantity || 0);
+    const price = Math.round(o.price    || 0);
     const amt   = qty * price;
     const channelCells = channels.map(ch => {
       const v = (o.store_id === ch.id) ? qty : 0;
@@ -342,11 +342,6 @@ function buildInstoreOrderRows(channels, mode) {
   }).join('');
 }
 
-// dx 注文を商品名でマスタにマッチさせて pid を返す（マッチしなければ null）
-function matchInstoreProductId(productName) {
-  const p = cachedProducts.find(p=>p.name===productName);
-  return p ? p.id : null;
-}
 
 // 注文弁当の別表HTMLを返す（colspan指定）
 function buildBentoOrdersTable(colspan) {
@@ -684,20 +679,6 @@ function updateRiceCalc() {
   document.querySelectorAll('input[type="number"][data-pid][data-cid]').forEach(inp => {
     const pid = parseInt(inp.dataset.pid);
     const v   = parseInt(inp.value) || 0;
-    if (ricePids.has(pid))     riceTotal     += v;
-    if (sansyokuPids.has(pid)) sansyokuTotal += v;
-    if (chirashiPids.has(pid)) chirashiTotal += v;
-    if (tamagoPids.has(pid))   tamagoTotal   += v;
-    if (saladPids.has(pid))    saladTotal    += v;
-    if (bentoPids.has(pid))    bentoTotal    += v;
-    if (tenpuraPids.has(pid))  tenpuraTotal  += v;
-    if (nishimePids.has(pid))  nishimeTotal  += v;
-  });
-  // dx 店頭注文の数量も加算（商品名でマスタ照合）
-  cachedInstoreOrders.forEach(o => {
-    const pid = matchInstoreProductId(o.product_name);
-    if (pid === null) return;
-    const v = o.quantity || 0;
     if (ricePids.has(pid))     riceTotal     += v;
     if (sansyokuPids.has(pid)) sansyokuTotal += v;
     if (chirashiPids.has(pid)) chirashiTotal += v;
@@ -1343,15 +1324,9 @@ async function renderReportPage() {
     matrixBody += `<tr><td class="fw-bold" colspan="${3+channels.length}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ 弁当</td></tr>`;
     matrixBody += buildInstoreOrderRows(channels, 'report');
   }
-  // dx 店頭注文を合計に加算（マトリクス末尾の列合計／総合計に反映）
-  cachedInstoreOrders.forEach(o => {
-    const qty = o.quantity || 0;
-    const amt = qty * (o.price || 0);
-    if (chTotals[o.store_id]    !== undefined) chTotals[o.store_id]    += amt;
-    if (chQtyTotals[o.store_id] !== undefined) chQtyTotals[o.store_id] += qty;
-    grandTotal += amt;
-    grandQty   += qty;
-  });
+  // dx 店頭注文は明細としては表示するが、matrix 合計には加算しない（月次・年次と揃え、注文売上 KPI で別表示）
+  const instoreSales = cachedInstoreOrders.reduce((s,o)=>s+Math.round(o.quantity||0)*Math.round(o.price||0), 0);
+  const instoreQty   = cachedInstoreOrders.reduce((s,o)=>s+Math.round(o.quantity||0), 0);
   const totalCells = channels.map(c=>`<td class="text-right fw-bold" style="background:#E8F0E8">${chQtyTotals[c.id]||'―'}</td>`).join('');
   const amtCells   = channels.map(c=>`<td class="text-right fw-bold" style="background:#F0F7F0;color:#2E7D32">${chTotals[c.id]?fmt(chTotals[c.id]):'―'}</td>`).join('');
   matrixBody += `<tr style="background:var(--surface2)">
@@ -1387,6 +1362,7 @@ async function renderReportPage() {
     <div class="kpi-grid">
       <div class="kpi"><div class="kpi-label">天気</div><div class="kpi-value" style="font-size:20px">${r.weather||'―'}</div></div>
       <div class="kpi"><div class="kpi-label">売上合計</div><div class="kpi-value green">${fmt(r.total_sales)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">注文売上</div><div class="kpi-value" style="color:#E65100">${fmt(instoreSales)}</div><div class="kpi-sub">円${instoreQty?'　('+instoreQty+'件)':''}（dx 取込）</div></div>
       <div class="kpi"><div class="kpi-label">材料費（50%）</div><div class="kpi-value warn">${fmt(r.material_cost)}</div><div class="kpi-sub">円</div></div>
       <div class="kpi"><div class="kpi-label">人件費</div><div class="kpi-value warn">${fmt(r.labor_cost)}</div><div class="kpi-sub">円　<span style="font-size:12px">(${r.total_sales>0?(r.labor_cost/r.total_sales*100).toFixed(1):'0.0'}%)</span></div></div>
       <div class="kpi"><div class="kpi-label">経費（固定）</div><div class="kpi-value">${fmt(r.expense)}</div><div class="kpi-sub">円</div></div>

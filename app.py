@@ -654,7 +654,8 @@ def monthly_summary():
     instore_rows = sb.table('hq_instore_orders').select('date,quantity,price').like('date',ym+'%').execute().data
     instore_by_date = {}
     for r in instore_rows:
-        instore_by_date[r['date']] = instore_by_date.get(r['date'],0) + (r.get('quantity') or 0) * (r.get('price') or 0)
+        amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
+        instore_by_date[r['date']] = instore_by_date.get(r['date'],0) + amt
     total_instore = sum(instore_by_date.values())
     if not rows:
         return jsonify({'month':ym,'days':[],'summary':{'total_instore_sales':total_instore}})
@@ -686,7 +687,8 @@ def yearly_summary():
     for r in instore_rows:
         m = (r.get('date') or '')[:7]
         if not m: continue
-        instore_by_month[m] = instore_by_month.get(m,0) + (r.get('quantity') or 0) * (r.get('price') or 0)
+        amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
+        instore_by_month[m] = instore_by_month.get(m,0) + amt
     total_instore = sum(instore_by_month.values())
     if not rows:
         return jsonify({'year':year,'months':[],'summary':{'total_instore_sales':total_instore}})
@@ -787,8 +789,8 @@ def get_bento_orders():
             'store_id':      o.get('storeId'),
             'product_name':  o.get('productName') or '',
             'customer_name': o.get('customerName') or '',
-            'quantity':      o.get('quantity') or 0,
-            'price':         p.get('price') or 0,
+            'quantity':      int(o.get('quantity') or 0),
+            'price':         int(round(float(p.get('price') or 0))),
             'category':      p.get('category') or '弁当',
         })
     return jsonify(result)
@@ -811,10 +813,16 @@ def get_instore_orders():
     if not target_date:
         return jsonify({'error':'date required'}), 400
 
+    def _normalize(rows):
+        for r in rows:
+            if r.get('price')    is not None: r['price']    = int(round(float(r['price'])))
+            if r.get('quantity') is not None: r['quantity'] = int(r['quantity'])
+        return rows
+
     # 過去日 → hq のキャッシュだけ返す
     if target_date < today_jst().isoformat():
         rows = sb.table('hq_instore_orders').select('*').eq('date',target_date).order('id').execute().data
-        return jsonify(rows)
+        return jsonify(_normalize(rows))
 
     # 当日以降 → dx から取得して mirror（sb_dx は dx 専用クライアント）
     try:
@@ -824,7 +832,7 @@ def get_instore_orders():
     except Exception as e:
         # dx 接続失敗時は hq のキャッシュにフォールバック
         rows = sb.table('hq_instore_orders').select('*').eq('date',target_date).order('id').execute().data
-        return jsonify(rows)
+        return jsonify(_normalize(rows))
 
     if not dx_orders:
         return jsonify([])
@@ -847,8 +855,8 @@ def get_instore_orders():
             'store_id':      o['storeId'],
             'product_name':  o['productName'],
             'customer_name': o.get('customerName') or '',
-            'quantity':      o.get('quantity') or 0,
-            'price':         p.get('price')    or 0,
+            'quantity':      int(o.get('quantity') or 0),
+            'price':         int(round(float(p.get('price') or 0))),
             'category':      p.get('category') or '弁当',
             'source_id':     source_id,
         })
@@ -856,7 +864,7 @@ def get_instore_orders():
         sb.table('hq_instore_orders').upsert(mirror_rows, on_conflict='source_id').execute()
 
     rows = sb.table('hq_instore_orders').select('*').eq('date',target_date).order('id').execute().data
-    return jsonify(rows)
+    return jsonify(_normalize(rows))
 
 if __name__ == '__main__':
     app.run(debug=True, port=5050)
