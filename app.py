@@ -476,7 +476,43 @@ def calc_daily_report(target_date, expense_override=None):
     total        = sum(r['actual_amount'] for r in actuals)
     west         = sum(r['actual_amount'] for r in actuals if channels.get(r['channel_id'])=='西店')
     south        = sum(r['actual_amount'] for r in actuals if channels.get(r['channel_id'])=='南店')
-    other        = total - west - south
+
+    # dx 店頭注文を合算（store_id→channel で west/south/other に振り分け）
+    instore_rows = sb.table('hq_instore_orders').select('store_id,quantity,price').eq('date',target_date).execute().data
+    for r in instore_rows:
+        sid = r.get('store_id')
+        if sid not in active_cids: continue
+        amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
+        total += amt
+        cname = channels.get(sid)
+        if cname == '西店':   west  += amt
+        elif cname == '南店': south += amt
+
+    # bento システム注文を合算（active のみ、すべて 配達 チャネル → other 扱い）
+    try:
+        bento_orders = sb.table('orders').select('product_id,quantity,status')\
+            .eq('delivery_date',target_date).eq('status','active').execute().data
+    except Exception:
+        bento_orders = []
+    if bento_orders:
+        bento_pids = list({o['product_id'] for o in bento_orders if o.get('product_id')})
+        try:
+            bento_prods = sb.table('products').select('*').in_('id', bento_pids).execute().data
+        except Exception:
+            bento_prods = []
+        def _bp_price(p):
+            for k in ('price','unit_price'):
+                v = p.get(k)
+                if v is not None:
+                    try:    return int(round(float(v)))
+                    except: pass
+            return 0
+        bp_price = {p['id']: _bp_price(p) for p in bento_prods}
+        for o in bento_orders:
+            amt = int(round(float(o.get('quantity') or 0))) * bp_price.get(o.get('product_id'), 0)
+            total += amt  # 配達は西/南以外なので other に入る
+
+    other = total - west - south
 
     betch_pids = {p['id'] for p in sb.table('hq_products').select('id').like('name','別注%').execute().data}
     separate_orders = int(sum(r['actual_amount'] for r in actuals if r['product_id'] in betch_pids))
