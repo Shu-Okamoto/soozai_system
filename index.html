@@ -1315,15 +1315,18 @@ async function updateExpense(date) {
 // ═══════════════════════════════════════════════
 // 週間献立
 // ═══════════════════════════════════════════════
-const MENU_CATS = ['メイン（煮物）','煮物①','煮物②','酢もの①','酢もの②','天ぷら','魚','サラダ①','サラダ②','漬物'];
+const MENU_CATS = ['メイン（煮物）','煮物①','煮物②','酢もの①','酢もの②','天ぷら','デラックスメイン','メイン肉','魚','サラダ①','サラダ②','漬物'];
 // getSubcats / getCatOrder / cachedCategories はinitData近辺で定義済み
 const MENU_CAT_TO_SUBCAT = {
   'メイン（煮物）':'煮物','煮物①':'煮物','煮物②':'煮物',
   '酢もの①':'酢もの','酢もの②':'酢もの',
   '天ぷら':'天ぷら','魚':'魚',
+  'デラックスメイン':['メイン肉','揚げ物','魚'],
+  'メイン肉':['メイン肉','揚げ物'],
   'サラダ①':'サラダ','サラダ②':'サラダ',
   '漬物':'漬物',
 };
+const REMOVABLE_FIXED_CATS = new Set(['デラックスメイン','メイン肉']);
 const DOW_LABELS = ['月','火','水','木','金','土'];
 let extraMenuRowCount = 0;
 let _menuCurrentMonday = '';
@@ -1352,14 +1355,25 @@ async function renderMenuPage() {
 
   // 固定行
   const fixedRows = MENU_CATS.map(cat => {
-    const subcat = MENU_CAT_TO_SUBCAT[cat] || '';
-    const filtered = subcat ? souzaiProds.filter(p=>p.subcategory===subcat) : souzaiProds;
-    return ['<div class="wc cat">'+cat+'</div>',
+    const subcat = MENU_CAT_TO_SUBCAT[cat];
+    const filtered = Array.isArray(subcat)
+      ? souzaiProds.filter(p=>subcat.includes(p.subcategory))
+      : subcat ? souzaiProds.filter(p=>p.subcategory===subcat)
+      : souzaiProds;
+    const removable = REMOVABLE_FIXED_CATS.has(cat);
+    const labelCell = removable
+      ? `<div class="wc cat" data-extra-row="${cat}" style="display:flex;align-items:center;justify-content:space-between">
+          <span>${cat}</span>
+          <button class="btn btn-secondary btn-sm no-print" style="padding:1px 5px;color:var(--danger)" onclick="removeMenuRow('${cat}')">×</button>
+        </div>`
+      : '<div class="wc cat">'+cat+'</div>';
+    return [labelCell,
       ...days.map((_,i)=>{
         const dow=i+1;
         const cur = menuMap[dow]?.[cat]||'';
         const opts = '<option value="">―</option>' + filtered.map(p=>`<option value="${p.name}"${p.name===cur?' selected':''}>${p.name}</option>`).join('');
-        return `<div class="wc ${i===5?'sat':''}"><select data-dow="${dow}" data-cat="${cat}">${opts}</select></div>`;
+        const dataExtra = removable ? ` data-extra-row="${cat}"` : '';
+        return `<div class="wc ${i===5?'sat':''}"${dataExtra}><select data-dow="${dow}" data-cat="${cat}">${opts}</select></div>`;
       })
     ].join('');
   }).join('');
@@ -1374,11 +1388,13 @@ async function renderMenuPage() {
 
   const extraRows = savedExtras.map(cat => buildExtraMenuRow(cat, days, menuMap, allProdOpts)).join('');
 
+  const isAdmin = currentRole === 'admin';
   document.getElementById('content').innerHTML = `
     <div class="no-print btn-group mb-16">
-      <button class="btn btn-secondary btn-sm" onclick="copyPrevWeekMenus('${mondayStr}')">◀ 前の週と同じ</button>
+      <button class="btn btn-secondary btn-sm" onclick="gotoPrevWeekMenu('${mondayStr}')">◀ 前の週へ</button>
       <button class="btn btn-primary" onclick="saveMenus('${mondayStr}')">💾 保存</button>
       <span class="text-muted" style="font-size:12px;align-self:center">${mondayStr} 〜 ${days[5]}</span>
+      ${isAdmin ? `<button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="copyPrevWeekMenus('${mondayStr}')">📋 前の週の献立をコピー</button>` : ''}
     </div>
     <div class="card">
       <div class="card-header">
@@ -1392,6 +1408,15 @@ async function renderMenuPage() {
       </div>
     </div>
   `;
+}
+
+function gotoPrevWeekMenu(currentMonday) {
+  const d = new Date(currentMonday);
+  d.setDate(d.getDate() - 7);
+  const prev = d.toISOString().slice(0, 10);
+  currentDate = prev;
+  document.getElementById('global-date').value = prev;
+  renderMenuPage();
 }
 
 function buildExtraMenuRow(catKey, days, menuMap, allProdOpts) {
