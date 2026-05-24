@@ -841,7 +841,8 @@ def get_bento_orders():
     """指定日(?date=YYYY-MM-DD)、または無指定なら明日以降の弁当注文を取得"""
     target_date = request.args.get('date')
     try:
-        q = sb.table('orders').select('*')
+        # status='active' のみ取り込み（cancelled 等は除外）
+        q = sb.table('orders').select('*').eq('status', 'active')
         if target_date:
             q = q.eq('delivery_date', target_date)
         else:
