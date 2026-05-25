@@ -683,7 +683,7 @@ function updateRiceCalc() {
     p.category==='弁当' &&
     (p.name.includes('デラックス') || p.name.includes('1000') || p.name.includes('1200') ||
      p.name.includes('1500') || p.name.includes('2000') || p.name.includes('2500')) &&
-    !p.name.includes('幕ノ内') && !p.name.includes('みかわ') && !p.name.includes('三色')
+    !p.name.includes('幕ノ内') && !p.name.includes('みかわ')
   ).map(p=>p.id));
   const saladPids    = new Set(cachedProducts.filter(p=>p.subcategory==='サラダ').map(p=>p.id));
   const bentoPids    = new Set(cachedProducts.filter(p=>
@@ -727,7 +727,7 @@ function updateRiceCalc() {
     else if (cat === '弁当') riceTotal += v;  // 三色/ちらし以外の弁当は白米扱い
     if (cat === '弁当' &&
         (name.includes('デラックス') || name.includes('1000') || name.includes('1200') || hasBigSize) &&
-        !name.includes('幕ノ内') && !name.includes('みかわ') && !isSansyoku) {
+        !name.includes('幕ノ内') && !name.includes('みかわ')) {
       tamagoTotal += v;
     }
     if (isBento) saladTotal += v;  // サラダは弁当 count と同じ条件
