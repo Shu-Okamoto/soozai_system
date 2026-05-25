@@ -458,6 +458,9 @@ function showToast(msg, isErr=false) {
 
 function fmt(n) { return Math.round(n||0).toLocaleString(); }
 
+const REDUCED_TAX_RATE = 1.08;
+function excludeTax(taxIncluded) { return Math.round((taxIncluded||0) / REDUCED_TAX_RATE); }
+
 function getMondayOf(dateStr) {
   const dt = new Date(dateStr);
   const dow = dt.getDay()===0 ? 6 : dt.getDay()-1;
@@ -1440,7 +1443,7 @@ async function renderReportPage() {
 
     <div class="kpi-grid">
       <div class="kpi"><div class="kpi-label">天気</div><div class="kpi-value" style="font-size:20px">${r.weather||'―'}</div></div>
-      <div class="kpi"><div class="kpi-label">売上合計</div><div class="kpi-value green">${fmt(r.total_sales)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">売上合計（税込）</div><div class="kpi-value green">${fmt(r.total_sales)}</div><div class="kpi-sub">円　<span style="font-size:12px">税抜 ¥${fmt(excludeTax(r.total_sales))}</span></div></div>
       <div class="kpi"><div class="kpi-label">注文売上</div><div class="kpi-value" style="color:#E65100">${fmt(instoreSales)}</div><div class="kpi-sub">円${instoreQty?'　('+instoreQty+'件)':''}（dx 取込）</div></div>
       <div class="kpi"><div class="kpi-label">材料費（50%）</div><div class="kpi-value warn">${fmt(r.material_cost)}</div><div class="kpi-sub">円</div></div>
       <div class="kpi"><div class="kpi-label">人件費</div><div class="kpi-value warn">${fmt(r.labor_cost)}</div><div class="kpi-sub">円　<span style="font-size:12px">(${r.total_sales>0?(r.labor_cost/r.total_sales*100).toFixed(1):'0.0'}%)</span></div></div>
@@ -1727,7 +1730,7 @@ async function renderMonthlyPage() {
     </div>
 
     <div class="kpi-grid">
-      <div class="kpi"><div class="kpi-label">合計売上</div><div class="kpi-value green">${fmt(s.total_sales)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">合計売上（税込）</div><div class="kpi-value green">${fmt(s.total_sales)}</div><div class="kpi-sub">円　<span style="font-size:12px">税抜 ¥${fmt(excludeTax(s.total_sales))}</span></div></div>
       <div class="kpi"><div class="kpi-label">注文売上</div><div class="kpi-value" style="color:#E65100">${fmt(s.total_instore_sales||0)}</div><div class="kpi-sub">円（dx 取込）</div></div>
       <div class="kpi"><div class="kpi-label">合計利益</div><div class="kpi-value ${s.total_profit>=0?'green':'red'}">${fmt(s.total_profit)}</div><div class="kpi-sub">円　利益率 ${s.profit_rate}%</div></div>
       <div class="kpi"><div class="kpi-label">人件費計</div><div class="kpi-value warn">${fmt(s.total_labor)}</div><div class="kpi-sub">円　人件費率 ${s.labor_rate}%</div></div>
@@ -1808,7 +1811,7 @@ async function renderYearlyPage() {
     </div>
 
     <div class="kpi-grid">
-      <div class="kpi"><div class="kpi-label">年間売上</div><div class="kpi-value green">${fmt(s.total_sales)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">年間売上（税込）</div><div class="kpi-value green">${fmt(s.total_sales)}</div><div class="kpi-sub">円　<span style="font-size:12px">税抜 ¥${fmt(excludeTax(s.total_sales))}</span></div></div>
       <div class="kpi"><div class="kpi-label">注文売上</div><div class="kpi-value" style="color:#E65100">${fmt(s.total_instore_sales||0)}</div><div class="kpi-sub">円（dx 取込）</div></div>
       <div class="kpi"><div class="kpi-label">年間利益</div><div class="kpi-value ${s.total_profit>=0?'green':'red'}">${fmt(s.total_profit)}</div><div class="kpi-sub">円　利益率 ${s.profit_rate}%</div></div>
       <div class="kpi"><div class="kpi-label">人件費計</div><div class="kpi-value warn">${fmt(s.total_labor)}</div><div class="kpi-sub">円　人件費率 ${s.labor_rate}%</div></div>
