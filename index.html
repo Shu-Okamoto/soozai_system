@@ -382,10 +382,10 @@ function buildBentoOrderRows(channels, mode) {
     const amt = g.quantity * g.price;
     const channelCells = channels.map(ch => {
       const v = (ch.id === deliveryCh.id) ? g.quantity : 0;
-      return `<td class="${numAlign}" style="background:#FFF8E1;color:#E65100">${v || ''}</td>`;
+      return `<td class="${numAlign}" style="background:#BBDEFB;color:#1565C0">${v || ''}</td>`;
     }).join('');
-    const nameCell  = `<td class="left" style="white-space:nowrap;color:#E65100;background:#FFFDE7">${g.product_name}（${g.display_name?g.display_name+'様':''}）</td>`;
-    const priceCell = `<td style="background:#FFFDE7;color:var(--text2);white-space:nowrap;${priceAlign}">¥${g.price.toLocaleString()}</td>`;
+    const nameCell  = `<td class="left" style="white-space:nowrap;color:#1565C0;background:#E3F2FD">${g.product_name}（${g.display_name?g.display_name+'様':''}）</td>`;
+    const priceCell = `<td style="background:#E3F2FD;color:var(--text2);white-space:nowrap;${priceAlign}">¥${g.price.toLocaleString()}</td>`;
     let tailCells;
     if (mode === 'report') {
       tailCells = `<td class="text-right fw-bold" style="background:#F5F5F5">${g.quantity||'―'}</td>
@@ -393,7 +393,7 @@ function buildBentoOrderRows(channels, mode) {
     } else {
       tailCells = `<td class="fw-bold text-center" style="background:#F0F7F0">${g.quantity||''}</td>`;
     }
-    return `<tr data-bento-row="1" style="background:#FFFDE7">${nameCell}${priceCell}${channelCells}${tailCells}</tr>`;
+    return `<tr data-bento-row="1" style="background:#E3F2FD">${nameCell}${priceCell}${channelCells}${tailCells}</tr>`;
   }).join('');
 }
 
