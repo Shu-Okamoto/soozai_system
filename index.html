@@ -695,7 +695,7 @@ function updateRiceCalc() {
   ).map(p=>p.id));
   const nishimePids  = new Set(cachedProducts.filter(p=>
     p.category==='弁当' &&
-    (p.name.includes('煮しめ') || p.name.includes('作り1500円') ||
+    (p.name.includes('1500円') ||
      p.name.includes('2000円') || p.name.includes('2500円') || p.name.includes('3000円'))
   ).map(p=>p.id));
 
@@ -734,7 +734,7 @@ function updateRiceCalc() {
     if (isBento) bentoTotal += v;
     if ((cat === '弁当' && !hasBigSize) || name.includes('おかずセット')) tenpuraTotal += v;
     if (cat === '弁当' &&
-        (name.includes('煮しめ') || name.includes('作り1500円') ||
+        (name.includes('1500円') ||
          name.includes('2000円') || name.includes('2500円') || name.includes('3000円'))) {
       nishimeTotal += v;
     }
