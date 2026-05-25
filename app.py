@@ -686,13 +686,14 @@ def generate_daily_report(date_str):
 def monthly_summary():
     ym   = request.args.get('month')
     rows = sb.table('hq_daily_reports').select('*').like('date',ym+'%').order('date').execute().data
-    # 注文売上を期間集計（dx 店頭注文 + bento システム注文）。営業日と独立で daily_report 未生成日も拾う
+    # 注文売上を期間集計。dx 店頭注文と bento アプリ注文は別キーで保持（列分離のため）
     instore_rows = sb.table('hq_instore_orders').select('date,quantity,price').like('date',ym+'%').execute().data
     instore_by_date = {}
     for r in instore_rows:
         amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
         instore_by_date[r['date']] = instore_by_date.get(r['date'],0) + amt
     # bento システムの orders を月内範囲で取得（product_id 経由で price を引く）
+    bento_by_date = {}
     try:
         bento_orders = sb.table('orders').select('delivery_date,product_id,quantity')\
             .like('delivery_date',ym+'%').execute().data
@@ -715,13 +716,15 @@ def monthly_summary():
         for o in bento_orders:
             d   = o.get('delivery_date')
             amt = int(round(float(o.get('quantity') or 0))) * bp_price.get(o.get('product_id'), 0)
-            if d: instore_by_date[d] = instore_by_date.get(d,0) + amt
+            if d: bento_by_date[d] = bento_by_date.get(d,0) + amt
     total_instore = sum(instore_by_date.values())
+    total_bento   = sum(bento_by_date.values())
     if not rows:
-        return jsonify({'month':ym,'days':[],'summary':{'total_instore_sales':total_instore}})
+        return jsonify({'month':ym,'days':[],'summary':{'total_instore_sales':total_instore,'total_bento_sales':total_bento}})
     days = rows
     for d in days:
         d['instore_sales'] = instore_by_date.get(d['date'], 0)
+        d['bento_sales']   = bento_by_date.get(d['date'], 0)
     total_sales = sum(d['total_sales'] for d in days)
     total_labor = sum(d['labor_cost']  for d in days)
     total_profit= sum(d['profit']      for d in days)
@@ -733,7 +736,8 @@ def monthly_summary():
                'op_days':len(days),'avg_daily_sales':int(total_sales/len(days)) if days else 0,
                'avg_labor_prod':round(avg_lp,0),
                'west_sales':sum(d['west_sales'] for d in days),'south_sales':sum(d['south_sales'] for d in days),'other_sales':sum(d['other_sales'] for d in days),
-               'total_instore_sales':total_instore}
+               'total_instore_sales':total_instore,
+               'total_bento_sales':total_bento}
     return jsonify({'month':ym,'days':days,'summary':summary})
 
 # ─── 年次サマリ ────────────────────────────────
@@ -741,7 +745,7 @@ def monthly_summary():
 def yearly_summary():
     year = request.args.get('year')
     rows = sb.table('hq_daily_reports').select('*').like('date',year+'%').order('date').execute().data
-    # 注文売上を月別集計（dx 店頭注文 + bento システム注文）
+    # 注文売上を月別集計。dx 店頭注文と bento アプリ注文は別キーで保持（列分離のため）
     instore_rows = sb.table('hq_instore_orders').select('date,quantity,price').like('date',year+'%').execute().data
     instore_by_month = {}
     for r in instore_rows:
@@ -749,6 +753,7 @@ def yearly_summary():
         if not m: continue
         amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
         instore_by_month[m] = instore_by_month.get(m,0) + amt
+    bento_by_month = {}
     try:
         bento_orders = sb.table('orders').select('delivery_date,product_id,quantity')\
             .like('delivery_date',year+'%').execute().data
@@ -771,10 +776,11 @@ def yearly_summary():
         for o in bento_orders:
             m   = (o.get('delivery_date') or '')[:7]
             amt = int(round(float(o.get('quantity') or 0))) * bp_price.get(o.get('product_id'), 0)
-            if m: instore_by_month[m] = instore_by_month.get(m,0) + amt
+            if m: bento_by_month[m] = bento_by_month.get(m,0) + amt
     total_instore = sum(instore_by_month.values())
+    total_bento   = sum(bento_by_month.values())
     if not rows:
-        return jsonify({'year':year,'months':[],'summary':{'total_instore_sales':total_instore}})
+        return jsonify({'year':year,'months':[],'summary':{'total_instore_sales':total_instore,'total_bento_sales':total_bento}})
     months = {}
     for d in rows:
         m = d['date'][:7]
@@ -796,6 +802,7 @@ def yearly_summary():
         m['labor_rate']     = round(m['total_labor']/ts*100,1)  if ts else 0
         m['avg_labor_prod'] = round(ts/m['total_hours'],0)      if m['total_hours'] else 0
         m['instore_sales']  = instore_by_month.get(m['month'], 0)
+        m['bento_sales']    = bento_by_month.get(m['month'], 0)
     total_sales = sum(d.get('total_sales',0) or 0 for d in rows)
     total_labor = sum(d.get('labor_cost',0)  or 0 for d in rows)
     total_profit= sum(d.get('profit',0)      or 0 for d in rows)
@@ -808,7 +815,8 @@ def yearly_summary():
                'west_sales':sum(d.get('west_sales',0)   or 0 for d in rows),
                'south_sales':sum(d.get('south_sales',0) or 0 for d in rows),
                'other_sales':sum(d.get('other_sales',0) or 0 for d in rows),
-               'total_instore_sales':total_instore}
+               'total_instore_sales':total_instore,
+               'total_bento_sales':total_bento}
     return jsonify({'year':year,'months':months_list,'summary':summary})
 
 # ─── 印刷用データ ─────────────────────────────

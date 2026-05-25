@@ -1388,11 +1388,11 @@ async function renderReportPage() {
   }
   // dx 店頭注文 + bento 注文：matrix 合計（列合計・総合計）にも加算（行合計と整合させる）
   const deliveryChForTotal = channels.find(c => c.name === '配達');
-  let instoreSales = 0, instoreQty = 0;
+  let dxSales = 0, dxQty = 0, bentoSales = 0, bentoQty = 0;
   cachedInstoreOrders.forEach(o => {
     const qty = Math.round(o.quantity || 0);
     const amt = qty * Math.round(o.price || 0);
-    instoreSales += amt; instoreQty += qty;
+    dxSales += amt; dxQty += qty;
     if (chTotals[o.store_id]    !== undefined) chTotals[o.store_id]    += amt;
     if (chQtyTotals[o.store_id] !== undefined) chQtyTotals[o.store_id] += qty;
     grandTotal += amt;
@@ -1401,7 +1401,7 @@ async function renderReportPage() {
   cachedBentoOrders.forEach(o => {
     const qty = Math.round(o.quantity || 0);
     const amt = qty * Math.round(o.price || 0);
-    instoreSales += amt; instoreQty += qty;
+    bentoSales += amt; bentoQty += qty;
     if (deliveryChForTotal && chTotals[deliveryChForTotal.id] !== undefined) {
       chTotals[deliveryChForTotal.id]    += amt;
       chQtyTotals[deliveryChForTotal.id] += qty;
@@ -1444,7 +1444,8 @@ async function renderReportPage() {
     <div class="kpi-grid">
       <div class="kpi"><div class="kpi-label">天気</div><div class="kpi-value" style="font-size:20px">${r.weather||'―'}</div></div>
       <div class="kpi"><div class="kpi-label">売上合計（税込）</div><div class="kpi-value green">${fmt(r.total_sales)}</div><div class="kpi-sub">円　<span style="font-size:12px">税抜 ¥${fmt(excludeTax(r.total_sales))}</span></div></div>
-      <div class="kpi"><div class="kpi-label">注文売上</div><div class="kpi-value" style="color:#E65100">${fmt(instoreSales)}</div><div class="kpi-sub">円${instoreQty?'　('+instoreQty+'件)':''}（dx 取込）</div></div>
+      <div class="kpi"><div class="kpi-label">注文売上</div><div class="kpi-value" style="color:#E65100">${fmt(dxSales)}</div><div class="kpi-sub">円${dxQty?'　('+dxQty+'件)':''}（dx 取込）</div></div>
+      <div class="kpi"><div class="kpi-label">アプリ注文</div><div class="kpi-value" style="color:#1565C0">${fmt(bentoSales)}</div><div class="kpi-sub">円${bentoQty?'　('+bentoQty+'件)':''}（bento）</div></div>
       <div class="kpi"><div class="kpi-label">材料費（50%）</div><div class="kpi-value warn">${fmt(r.material_cost)}</div><div class="kpi-sub">円</div></div>
       <div class="kpi"><div class="kpi-label">人件費</div><div class="kpi-value warn">${fmt(r.labor_cost)}</div><div class="kpi-sub">円　<span style="font-size:12px">(${r.total_sales>0?(r.labor_cost/r.total_sales*100).toFixed(1):'0.0'}%)</span></div></div>
       <div class="kpi"><div class="kpi-label">経費（固定）</div><div class="kpi-value">${fmt(r.expense)}</div><div class="kpi-sub">円</div></div>
@@ -1712,6 +1713,7 @@ async function renderMonthlyPage() {
       <td>${d.weather||'―'}</td>
       <td class="text-right">${fmt(d.total_sales)}</td>
       <td class="text-right" style="color:#E65100">${d.instore_sales?fmt(d.instore_sales):'―'}</td>
+      <td class="text-right" style="color:#1565C0;background:#E3F2FD">${d.bento_sales?fmt(d.bento_sales):'―'}</td>
       <td class="text-right">${fmt(d.west_sales)}</td>
       <td class="text-right">${fmt(d.south_sales)}</td>
       <td class="text-right">${fmt(d.other_sales)}</td>
@@ -1732,6 +1734,7 @@ async function renderMonthlyPage() {
     <div class="kpi-grid">
       <div class="kpi"><div class="kpi-label">合計売上（税込）</div><div class="kpi-value green">${fmt(s.total_sales)}</div><div class="kpi-sub">円　<span style="font-size:12px">税抜 ¥${fmt(excludeTax(s.total_sales))}</span></div></div>
       <div class="kpi"><div class="kpi-label">注文売上</div><div class="kpi-value" style="color:#E65100">${fmt(s.total_instore_sales||0)}</div><div class="kpi-sub">円（dx 取込）</div></div>
+      <div class="kpi"><div class="kpi-label">アプリ注文</div><div class="kpi-value" style="color:#1565C0">${fmt(s.total_bento_sales||0)}</div><div class="kpi-sub">円（bento）</div></div>
       <div class="kpi"><div class="kpi-label">合計利益</div><div class="kpi-value ${s.total_profit>=0?'green':'red'}">${fmt(s.total_profit)}</div><div class="kpi-sub">円　利益率 ${s.profit_rate}%</div></div>
       <div class="kpi"><div class="kpi-label">人件費計</div><div class="kpi-value warn">${fmt(s.total_labor)}</div><div class="kpi-sub">円　人件費率 ${s.labor_rate}%</div></div>
       <div class="kpi"><div class="kpi-label">営業日数</div><div class="kpi-value">${s.op_days}</div><div class="kpi-sub">日</div></div>
@@ -1749,7 +1752,7 @@ async function renderMonthlyPage() {
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>日付</th><th>天気</th><th>売上</th><th style="color:#E65100">注文</th><th>西店</th><th>南店</th><th>その他</th>
+            <th>日付</th><th>天気</th><th>売上</th><th style="color:#E65100">注文</th><th style="color:#1565C0;background:#E3F2FD">アプリ注文</th><th>西店</th><th>南店</th><th>その他</th>
             <th>人件費</th><th>差引</th><th>人時売</th><th>総人時</th>
           </tr></thead>
           <tbody>${dayRows}</tbody>
@@ -1758,6 +1761,7 @@ async function renderMonthlyPage() {
             <td>―</td>
             <td class="text-right">${fmt(s.total_sales)}</td>
             <td class="text-right" style="color:#E65100">${fmt(s.total_instore_sales||0)}</td>
+            <td class="text-right" style="color:#1565C0;background:#E3F2FD">${fmt(s.total_bento_sales||0)}</td>
             <td class="text-right">${fmt(s.west_sales)}</td>
             <td class="text-right">${fmt(s.south_sales)}</td>
             <td class="text-right">${fmt(s.other_sales)}</td>
@@ -1794,6 +1798,7 @@ async function renderYearlyPage() {
       <td class="text-right">${m.op_days}</td>
       <td class="text-right">${fmt(m.total_sales)}</td>
       <td class="text-right" style="color:#E65100">${m.instore_sales?fmt(m.instore_sales):'―'}</td>
+      <td class="text-right" style="color:#1565C0;background:#E3F2FD">${m.bento_sales?fmt(m.bento_sales):'―'}</td>
       <td class="text-right">${fmt(m.west_sales)}</td>
       <td class="text-right">${fmt(m.south_sales)}</td>
       <td class="text-right">${fmt(m.other_sales)}</td>
@@ -1813,6 +1818,7 @@ async function renderYearlyPage() {
     <div class="kpi-grid">
       <div class="kpi"><div class="kpi-label">年間売上（税込）</div><div class="kpi-value green">${fmt(s.total_sales)}</div><div class="kpi-sub">円　<span style="font-size:12px">税抜 ¥${fmt(excludeTax(s.total_sales))}</span></div></div>
       <div class="kpi"><div class="kpi-label">注文売上</div><div class="kpi-value" style="color:#E65100">${fmt(s.total_instore_sales||0)}</div><div class="kpi-sub">円（dx 取込）</div></div>
+      <div class="kpi"><div class="kpi-label">アプリ注文</div><div class="kpi-value" style="color:#1565C0">${fmt(s.total_bento_sales||0)}</div><div class="kpi-sub">円（bento）</div></div>
       <div class="kpi"><div class="kpi-label">年間利益</div><div class="kpi-value ${s.total_profit>=0?'green':'red'}">${fmt(s.total_profit)}</div><div class="kpi-sub">円　利益率 ${s.profit_rate}%</div></div>
       <div class="kpi"><div class="kpi-label">人件費計</div><div class="kpi-value warn">${fmt(s.total_labor)}</div><div class="kpi-sub">円　人件費率 ${s.labor_rate}%</div></div>
       <div class="kpi"><div class="kpi-label">営業日数</div><div class="kpi-value">${s.op_days}</div><div class="kpi-sub">日</div></div>
@@ -1830,7 +1836,7 @@ async function renderYearlyPage() {
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>月</th><th>営業日</th><th>売上</th><th style="color:#E65100">注文</th><th>西店</th><th>南店</th><th>その他</th>
+            <th>月</th><th>営業日</th><th>売上</th><th style="color:#E65100">注文</th><th style="color:#1565C0;background:#E3F2FD">アプリ注文</th><th>西店</th><th>南店</th><th>その他</th>
             <th>人件費</th><th>利益</th><th>利益率</th><th>人時売</th>
           </tr></thead>
           <tbody>${monthRows}</tbody>
@@ -1839,6 +1845,7 @@ async function renderYearlyPage() {
             <td class="text-right">${s.op_days}</td>
             <td class="text-right">${fmt(s.total_sales)}</td>
             <td class="text-right" style="color:#E65100">${fmt(s.total_instore_sales||0)}</td>
+            <td class="text-right" style="color:#1565C0;background:#E3F2FD">${fmt(s.total_bento_sales||0)}</td>
             <td class="text-right">${fmt(s.west_sales)}</td>
             <td class="text-right">${fmt(s.south_sales)}</td>
             <td class="text-right">${fmt(s.other_sales)}</td>
