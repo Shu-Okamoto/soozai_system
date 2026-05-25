@@ -488,10 +488,10 @@ def calc_daily_report(target_date, expense_override=None):
         if cname == '西店':   west  += amt
         elif cname == '南店': south += amt
 
-    # bento システム注文を合算（active のみ、すべて 配達 チャネル → other 扱い）
+    # bento システム注文を合算（すべて 配達 チャネル → other 扱い）
     try:
-        bento_orders = sb.table('orders').select('product_id,quantity,status')\
-            .eq('delivery_date',target_date).eq('status','active').execute().data
+        bento_orders = sb.table('orders').select('product_id,quantity')\
+            .eq('delivery_date',target_date).execute().data
     except Exception:
         bento_orders = []
     if bento_orders:
@@ -694,8 +694,8 @@ def monthly_summary():
         instore_by_date[r['date']] = instore_by_date.get(r['date'],0) + amt
     # bento システムの orders を月内範囲で取得（product_id 経由で price を引く）
     try:
-        bento_orders = sb.table('orders').select('delivery_date,product_id,quantity,status')\
-            .like('delivery_date',ym+'%').eq('status','active').execute().data
+        bento_orders = sb.table('orders').select('delivery_date,product_id,quantity')\
+            .like('delivery_date',ym+'%').execute().data
     except Exception:
         bento_orders = []
     if bento_orders:
@@ -750,8 +750,8 @@ def yearly_summary():
         amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
         instore_by_month[m] = instore_by_month.get(m,0) + amt
     try:
-        bento_orders = sb.table('orders').select('delivery_date,product_id,quantity,status')\
-            .like('delivery_date',year+'%').eq('status','active').execute().data
+        bento_orders = sb.table('orders').select('delivery_date,product_id,quantity')\
+            .like('delivery_date',year+'%').execute().data
     except Exception:
         bento_orders = []
     if bento_orders:
@@ -841,8 +841,7 @@ def get_bento_orders():
     """指定日(?date=YYYY-MM-DD)、または無指定なら明日以降の弁当注文を取得"""
     target_date = request.args.get('date')
     try:
-        # status='active' のみ取り込み（cancelled 等は除外）
-        q = sb.table('orders').select('*').eq('status', 'active')
+        q = sb.table('orders').select('*')
         if target_date:
             q = q.eq('delivery_date', target_date)
         else:
