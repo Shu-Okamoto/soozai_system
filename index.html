@@ -681,9 +681,7 @@ function updateRiceCalc() {
   ).map(p=>p.id));
   const tamagoPids   = new Set(cachedProducts.filter(p=>
     p.category==='弁当' &&
-    (p.name.includes('デラックス') || p.name.includes('1000') || p.name.includes('1200') ||
-     p.name.includes('1500') || p.name.includes('2000') || p.name.includes('2500')) &&
-    !p.name.includes('幕ノ内') && !p.name.includes('みかわ')
+    (p.name.includes('デラックス') || (Number(p.price)||0) >= 800)
   ).map(p=>p.id));
   const saladPids    = new Set(cachedProducts.filter(p=>p.subcategory==='サラダ').map(p=>p.id));
   const bentoPids    = new Set(cachedProducts.filter(p=>
@@ -694,9 +692,7 @@ function updateRiceCalc() {
     p.name.includes('おかずセット')
   ).map(p=>p.id));
   const nishimePids  = new Set(cachedProducts.filter(p=>
-    p.category==='弁当' &&
-    (p.name.includes('1500円') ||
-     p.name.includes('2000円') || p.name.includes('2500円') || p.name.includes('3000円'))
+    p.category==='弁当' && (Number(p.price)||0) >= 1500
   ).map(p=>p.id));
 
   let riceTotal=0, sansyokuTotal=0, chirashiTotal=0, tamagoTotal=0, saladTotal=0, bentoTotal=0, tenpuraTotal=0, nishimeTotal=0;
@@ -714,9 +710,10 @@ function updateRiceCalc() {
   });
   // dx 店頭注文 + bento 注文：master 参照せず product_name の文字列パターンから直接分類（ヒューリスティック）
   const classifyOrder = o => {
-    const name = o.product_name || '';
-    const cat  = o.category     || '弁当';
-    const v    = Math.round(o.quantity || 0);
+    const name  = o.product_name || '';
+    const cat   = o.category     || '弁当';
+    const v     = Math.round(o.quantity || 0);
+    const price = Math.round(Number(o.price) || 0);
     if (!v) return;
     const isSansyoku = name.includes('三色');
     const isChirashi = name.includes('ちらし');
@@ -725,17 +722,13 @@ function updateRiceCalc() {
     if (isSansyoku) sansyokuTotal += v;
     else if (isChirashi) chirashiTotal += v;
     else if (cat === '弁当') riceTotal += v;  // 三色/ちらし以外の弁当は白米扱い
-    if (cat === '弁当' &&
-        (name.includes('デラックス') || name.includes('1000') || name.includes('1200') || hasBigSize) &&
-        !name.includes('幕ノ内') && !name.includes('みかわ')) {
+    if (cat === '弁当' && (name.includes('デラックス') || price >= 800)) {
       tamagoTotal += v;
     }
     if (isBento) saladTotal += v;  // サラダは弁当 count と同じ条件
     if (isBento) bentoTotal += v;
     if ((cat === '弁当' && !hasBigSize) || name.includes('おかずセット')) tenpuraTotal += v;
-    if (cat === '弁当' &&
-        (name.includes('1500円') ||
-         name.includes('2000円') || name.includes('2500円') || name.includes('3000円'))) {
+    if (cat === '弁当' && price >= 1500) {
       nishimeTotal += v;
     }
   };
