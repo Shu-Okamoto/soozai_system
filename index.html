@@ -680,7 +680,8 @@ function updateRiceCalc() {
     p.subcategory==='ちらし' || p.name.includes('ちらし寿司')
   ).map(p=>p.id));
   const tamagoPids   = new Set(cachedProducts.filter(p=>
-    p.name.includes('デラックス') || (Number(p.price)||0) >= 800
+    p.category==='弁当' &&
+    (p.name.includes('デラックス') || (Number(p.price)||0) >= 800)
   ).map(p=>p.id));
   const saladPids    = new Set(cachedProducts.filter(p=>p.subcategory==='サラダ').map(p=>p.id));
   const bentoPids    = new Set(cachedProducts.filter(p=>
@@ -691,7 +692,7 @@ function updateRiceCalc() {
     p.name.includes('おかずセット')
   ).map(p=>p.id));
   const nishimePids  = new Set(cachedProducts.filter(p=>
-    (Number(p.price)||0) >= 1500
+    p.category==='弁当' && (Number(p.price)||0) >= 1500
   ).map(p=>p.id));
 
   let riceTotal=0, sansyokuTotal=0, chirashiTotal=0, tamagoTotal=0, saladTotal=0, bentoTotal=0, tenpuraTotal=0, nishimeTotal=0;
@@ -721,13 +722,13 @@ function updateRiceCalc() {
     if (isSansyoku) sansyokuTotal += v;
     else if (isChirashi) chirashiTotal += v;
     else if (cat === '弁当') riceTotal += v;  // 三色/ちらし以外の弁当は白米扱い
-    if (name.includes('デラックス') || price >= 800) {
+    if (cat === '弁当' && (name.includes('デラックス') || price >= 800)) {
       tamagoTotal += v;
     }
     if (isBento) saladTotal += v;  // サラダは弁当 count と同じ条件
     if (isBento) bentoTotal += v;
     if ((cat === '弁当' && !hasBigSize) || name.includes('おかずセット')) tenpuraTotal += v;
-    if (price >= 1500) {
+    if (cat === '弁当' && price >= 1500) {
       nishimeTotal += v;
     }
   };
