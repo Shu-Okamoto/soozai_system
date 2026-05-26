@@ -143,18 +143,19 @@
       <button class="nav-item active" onclick="showPage('plan')"   id="nav-plan">📋 出荷指示書</button>
       <button class="nav-item"        onclick="showPage('actual')" id="nav-actual">✏️ 出荷実績入力</button>
       <button class="nav-item"        onclick="showPage('report')" id="nav-report">📊 売上日報</button>
-    </div>
-    <div class="nav-group">
-      <div class="nav-label">週次・月次</div>
-      <button class="nav-item" onclick="showPage('menu')"    id="nav-menu">🍱 週間献立</button>
-      <button class="nav-item" onclick="showPage('monthly')" id="nav-monthly">📈 月次サマリ</button>
-      <button class="nav-item" onclick="showPage('yearly')"  id="nav-yearly">📈 年次サマリ</button>
+      <button class="nav-item"        onclick="showPage('menu')"   id="nav-menu">🍱 週間献立表</button>
+      <button class="nav-item"        onclick="showPage('order')"  id="nav-order">🛒 発注</button>
     </div>
     <div class="nav-group admin-only">
-      <div class="nav-label">週次管理者業務</div>
+      <div class="nav-label">管理者業務</div>
       <button class="nav-item" onclick="showPage('adminplan')"   id="nav-adminplan">📋 出荷計画</button>
       <button class="nav-item" onclick="showPage('adminmenu')"   id="nav-adminmenu">🍱 献立作成</button>
       <button class="nav-item" onclick="showPage('adminshifts')" id="nav-adminshifts">📅 シフト作成</button>
+    </div>
+    <div class="nav-group admin-only">
+      <div class="nav-label">分析</div>
+      <button class="nav-item" onclick="showPage('monthly')" id="nav-monthly">📈 月次サマリ</button>
+      <button class="nav-item" onclick="showPage('yearly')"  id="nav-yearly">📈 年次サマリ</button>
     </div>
     <div class="nav-group admin-only">
       <div class="nav-label">マスタ</div>
@@ -437,10 +438,10 @@ function showPage(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:'出荷先マスタ',members:'メンバーマスタ',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成'};
+  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:'出荷先マスタ',members:'メンバーマスタ',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成'};
   document.getElementById('page-title').textContent = titles[page]||'';
   ({plan:renderPlanPage,actual:renderActualPage,report:renderReportPage,
-    menu:renderMenuPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,members:renderMembersPage,
+    menu:renderMenuPage,order:renderOrderPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,members:renderMembersPage,
     adminplan:renderAdminPlanPage,adminmenu:renderAdminMenuPage,adminshifts:renderAdminShiftsPage})[page]?.();
 }
 
@@ -1713,6 +1714,18 @@ async function saveMenus(weekStart) {
   inputs.forEach(sel=>{ if(sel.value) menus.push({day_of_week:+sel.dataset.dow,category:sel.dataset.cat,menu_name:sel.value}); });
   const r = await fetch(`${API}/weekly-menus`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({week_start:weekStart,menus})}).then(r=>r.json()).catch(()=>null);
   if (r?.ok) showToast('献立を保存しました'); else showToast('保存失敗',true);
+}
+
+// ═══════════════════════════════════════════════
+// 発注（準備中）
+// ═══════════════════════════════════════════════
+function renderOrderPage() {
+  document.getElementById('content').innerHTML = `
+    <div style="text-align:center;padding:80px 20px;color:var(--text2)">
+      <div style="font-size:64px;margin-bottom:16px">🛒</div>
+      <h2 style="font-size:22px;font-weight:700;margin-bottom:12px;color:var(--text)">発注機能は準備中です</h2>
+      <p style="font-size:14px">仕様が固まり次第こちらに実装します。</p>
+    </div>`;
 }
 
 // ═══════════════════════════════════════════════
