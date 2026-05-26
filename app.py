@@ -595,7 +595,8 @@ def get_daily_report(date_str):
         return jsonify(result)
 
     # 過去日かつ未確定 → 即時確定（遅延確定）してから再読込
-    if date_str < today_jst().isoformat():
+    # ただし以前確定→明示解除された日（snapshot 残存）は再確定しない（編集中扱い）
+    if date_str < today_jst().isoformat() and not (stored and stored.get('actuals_snapshot')):
         finalize_report(date_str)
         return get_daily_report(date_str)
 
@@ -621,6 +622,18 @@ def finalize_daily_report(date_str):
     if finalize_report(date_str):
         return jsonify({'ok': True, 'finalized_at': now_jst_iso()})
     return jsonify({'ok': False, 'error': 'already finalized'}), 409
+
+@app.route('/api/daily-reports/<date_str>/unfinalize', methods=['POST'])
+def unfinalize_daily_report(date_str):
+    """確定済み日報のロックを解除して再編集可能にする。
+    finalized_at を NULL に戻すが、snapshot 列は履歴として残す。"""
+    stored = sb.table('hq_daily_reports').select('finalized_at').eq('date',date_str).execute().data
+    if not stored:
+        return jsonify({'ok': False, 'error': 'not found'}), 404
+    if not stored[0].get('finalized_at'):
+        return jsonify({'ok': False, 'error': 'not finalized'}), 409
+    sb.table('hq_daily_reports').update({'finalized_at': None}).eq('date',date_str).execute()
+    return jsonify({'ok': True})
 
 @app.route('/api/admin/finalize-pending', methods=['POST'])
 def finalize_pending():

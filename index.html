@@ -938,7 +938,10 @@ async function renderActualPage() {
 
   const isFinalized = !!savedInfo?.finalized_at;
   const finalizedBanner = isFinalized
-    ? `<div class="alert" style="background:#E8F5E9;border:1px solid #43A047;color:#2E7D32;padding:8px 14px;border-radius:6px;margin-bottom:10px;font-weight:700">🔒 ${date} は確定済みです。天気・メモのみ変更できます。</div>`
+    ? `<div class="alert" style="background:#E8F5E9;border:1px solid #43A047;color:#2E7D32;padding:8px 14px;border-radius:6px;margin-bottom:10px;font-weight:700;display:flex;align-items:center;gap:12px">
+         <span>🔒 ${date} は確定済みです。天気・メモのみ変更できます。</span>
+         <button class="btn btn-secondary btn-sm" onclick="unfinalizeReport('${date}')" title="ロックを解除して実績を編集可能にする">🔓 確定解除</button>
+       </div>`
     : '';
 
   document.getElementById('content').innerHTML = `
@@ -1430,7 +1433,8 @@ async function renderReportPage() {
   const finalized = !!r.finalized_at;
   const finalizedAtLabel = finalized ? new Date(r.finalized_at).toLocaleString('ja-JP') : '';
   const finalizeBtn = finalized
-    ? `<span style="background:#E8F5E9;border:1px solid #43A047;color:#2E7D32;border-radius:6px;padding:4px 10px;font-size:13px;font-weight:700">🔒 確定済 ${finalizedAtLabel}</span>`
+    ? `<span style="background:#E8F5E9;border:1px solid #43A047;color:#2E7D32;border-radius:6px;padding:4px 10px;font-size:13px;font-weight:700">🔒 確定済 ${finalizedAtLabel}</span>
+       <button class="btn btn-secondary btn-sm" onclick="unfinalizeReport('${date}')" title="ロックを解除して実績を編集可能にする">🔓 確定解除</button>`
     : `<button class="btn btn-warn btn-sm" onclick="finalizeReport('${date}')">🔒 日報を確定する</button>`;
 
   document.getElementById('content').innerHTML = `
@@ -1519,6 +1523,26 @@ async function finalizeReport(date) {
     renderReportPage();
   } else {
     showToast('確定に失敗しました', true);
+  }
+}
+
+async function unfinalizeReport(date) {
+  if (!confirm(`${date} の確定を解除しますか？\n実績・シフトを再編集できるようになります。\n編集後は再度「日報を確定する」を実行してください（未確定のまま放置すると翌日の自動処理で再確定されます）。`)) return;
+  const res = await fetch(`${API}/daily-reports/${date}/unfinalize`,{method:'POST'});
+  if (res.ok) {
+    showToast('確定を解除しました');
+    // 呼び出し元（日報ビュー or 実績入力）に応じて再描画
+    if (typeof renderReportPage === 'function' && document.getElementById('content')?.querySelector('.print-header')) {
+      renderReportPage();
+    } else {
+      showPage('actual');
+    }
+  } else if (res.status === 409) {
+    showToast('確定されていません', true);
+  } else if (res.status === 404) {
+    showToast('対象日が見つかりません', true);
+  } else {
+    showToast('解除に失敗しました', true);
   }
 }
 
