@@ -695,6 +695,16 @@ def generate_daily_report(date_str):
     return jsonify({'ok': True, **calc})
 
 # ─── 月次サマリ ────────────────────────────────
+def _month_range(ym):
+    """ 'YYYY-MM' → (start, next_month_start) を ISO 文字列で返す """
+    y, m = int(ym[:4]), int(ym[5:7])
+    ny, nm = (y, m+1) if m < 12 else (y+1, 1)
+    return f'{y:04d}-{m:02d}-01', f'{ny:04d}-{nm:02d}-01'
+
+def _year_range(year):
+    y = int(year)
+    return f'{y:04d}-01-01', f'{y+1:04d}-01-01'
+
 @app.route('/api/monthly-summary', methods=['GET'])
 def monthly_summary():
     ym   = request.args.get('month')
@@ -706,10 +716,12 @@ def monthly_summary():
         amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
         instore_by_date[r['date']] = instore_by_date.get(r['date'],0) + amt
     # bento システムの orders を月内範囲で取得（product_id 経由で price を引く）
+    # delivery_date は DATE 型のため like ではなく gte/lt で範囲指定する
     bento_by_date = {}
+    start, end = _month_range(ym)
     try:
         bento_orders = sb.table('orders').select('delivery_date,product_id,quantity')\
-            .like('delivery_date',ym+'%').execute().data
+            .gte('delivery_date',start).lt('delivery_date',end).execute().data
     except Exception:
         bento_orders = []
     if bento_orders:
@@ -727,7 +739,7 @@ def monthly_summary():
             return 0
         bp_price = {p['id']: _bp_price(p) for p in bento_prods}
         for o in bento_orders:
-            d   = o.get('delivery_date')
+            d   = (o.get('delivery_date') or '')[:10]   # timestamp の場合に備えて先頭 10 文字
             amt = int(round(float(o.get('quantity') or 0))) * bp_price.get(o.get('product_id'), 0)
             if d: bento_by_date[d] = bento_by_date.get(d,0) + amt
     total_instore = sum(instore_by_date.values())
@@ -766,10 +778,12 @@ def yearly_summary():
         if not m: continue
         amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
         instore_by_month[m] = instore_by_month.get(m,0) + amt
+    # delivery_date は DATE 型のため like ではなく gte/lt で範囲指定する
     bento_by_month = {}
+    start, end = _year_range(year)
     try:
         bento_orders = sb.table('orders').select('delivery_date,product_id,quantity')\
-            .like('delivery_date',year+'%').execute().data
+            .gte('delivery_date',start).lt('delivery_date',end).execute().data
     except Exception:
         bento_orders = []
     if bento_orders:
