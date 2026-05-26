@@ -151,10 +151,10 @@
       <button class="nav-item" onclick="showPage('yearly')"  id="nav-yearly">📈 年次サマリ</button>
     </div>
     <div class="nav-group admin-only">
-      <div class="nav-label">管理者</div>
-      <button class="nav-item" onclick="showPage('adminplan')"   id="nav-adminplan">📋 週間予定数入力</button>
-      <button class="nav-item" onclick="showPage('adminmenu')"   id="nav-adminmenu">🍱 週間献立表</button>
-      <button class="nav-item" onclick="showPage('adminshifts')" id="nav-adminshifts">📅 週間シフト予定</button>
+      <div class="nav-label">週次管理者業務</div>
+      <button class="nav-item" onclick="showPage('adminplan')"   id="nav-adminplan">📋 出荷計画</button>
+      <button class="nav-item" onclick="showPage('adminmenu')"   id="nav-adminmenu">🍱 献立作成</button>
+      <button class="nav-item" onclick="showPage('adminshifts')" id="nav-adminshifts">📅 シフト作成</button>
     </div>
     <div class="nav-group admin-only">
       <div class="nav-label">マスタ</div>
@@ -437,7 +437,7 @@ function showPage(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:'出荷先マスタ',members:'メンバーマスタ',adminplan:'週間予定数入力',adminmenu:'週間献立表',adminshifts:'週間シフト予定'};
+  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:'出荷先マスタ',members:'メンバーマスタ',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成'};
   document.getElementById('page-title').textContent = titles[page]||'';
   ({plan:renderPlanPage,actual:renderActualPage,report:renderReportPage,
     menu:renderMenuPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,members:renderMembersPage,
