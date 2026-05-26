@@ -742,14 +742,17 @@ def monthly_summary():
             d   = (o.get('delivery_date') or '')[:10]   # timestamp の場合に備えて先頭 10 文字
             amt = int(round(float(o.get('quantity') or 0))) * bp_price.get(o.get('product_id'), 0)
             if d: bento_by_date[d] = bento_by_date.get(d,0) + amt
-    total_instore = sum(instore_by_date.values())
-    total_bento   = sum(bento_by_date.values())
     if not rows:
-        return jsonify({'month':ym,'days':[],'summary':{'total_instore_sales':total_instore,'total_bento_sales':total_bento}})
+        return jsonify({'month':ym,'days':[],'summary':{'total_instore_sales':0,'total_bento_sales':0}})
     days = rows
     for d in days:
         d['instore_sales'] = instore_by_date.get(d['date'], 0)
         d['bento_sales']   = bento_by_date.get(d['date'], 0)
+    # 合計は「表示中の per-day 行」の総和にする
+    # （by_date は daily_report がない日（将来の先付け注文等）も拾ってしまうため
+    #   total と日別行の合計が乖離してしまう。表示と合計を必ず一致させる）
+    total_instore = sum(d['instore_sales'] for d in days)
+    total_bento   = sum(d['bento_sales']   for d in days)
     total_sales = sum(d['total_sales'] for d in days)
     total_labor = sum(d['labor_cost']  for d in days)
     total_profit= sum(d['profit']      for d in days)
@@ -804,10 +807,8 @@ def yearly_summary():
             m   = (o.get('delivery_date') or '')[:7]
             amt = int(round(float(o.get('quantity') or 0))) * bp_price.get(o.get('product_id'), 0)
             if m: bento_by_month[m] = bento_by_month.get(m,0) + amt
-    total_instore = sum(instore_by_month.values())
-    total_bento   = sum(bento_by_month.values())
     if not rows:
-        return jsonify({'year':year,'months':[],'summary':{'total_instore_sales':total_instore,'total_bento_sales':total_bento}})
+        return jsonify({'year':year,'months':[],'summary':{'total_instore_sales':0,'total_bento_sales':0}})
     months = {}
     for d in rows:
         m = d['date'][:7]
@@ -830,6 +831,9 @@ def yearly_summary():
         m['avg_labor_prod'] = round(ts/m['total_hours'],0)      if m['total_hours'] else 0
         m['instore_sales']  = instore_by_month.get(m['month'], 0)
         m['bento_sales']    = bento_by_month.get(m['month'], 0)
+    # 合計は「表示中の per-month 行」の総和にする（daily_report のない月を含めない）
+    total_instore = sum(m['instore_sales'] for m in months_list)
+    total_bento   = sum(m['bento_sales']   for m in months_list)
     total_sales = sum(d.get('total_sales',0) or 0 for d in rows)
     total_labor = sum(d.get('labor_cost',0)  or 0 for d in rows)
     total_profit= sum(d.get('profit',0)      or 0 for d in rows)
