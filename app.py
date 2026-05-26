@@ -773,16 +773,16 @@ def monthly_summary():
 def yearly_summary():
     year = request.args.get('year')
     rows = sb.table('hq_daily_reports').select('*').like('date',year+'%').order('date').execute().data
-    # 注文売上を月別集計。dx 店頭注文と bento アプリ注文は別キーで保持（列分離のため）
+    # 注文売上を日別集計（月別ではなく）。日報がある日付の分だけ後で月集計に組み入れる
     instore_rows = sb.table('hq_instore_orders').select('date,quantity,price').like('date',year+'%').execute().data
-    instore_by_month = {}
+    instore_by_date = {}
     for r in instore_rows:
-        m = (r.get('date') or '')[:7]
-        if not m: continue
+        d = r.get('date')
+        if not d: continue
         amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
-        instore_by_month[m] = instore_by_month.get(m,0) + amt
+        instore_by_date[d] = instore_by_date.get(d,0) + amt
     # delivery_date は DATE 型のため like ではなく gte/lt で範囲指定する
-    bento_by_month = {}
+    bento_by_date = {}
     start, end = _year_range(year)
     try:
         bento_orders = sb.table('orders').select('delivery_date,product_id,quantity')\
@@ -804,9 +804,9 @@ def yearly_summary():
             return 0
         bp_price = {p['id']: _bp_price(p) for p in bento_prods}
         for o in bento_orders:
-            m   = (o.get('delivery_date') or '')[:7]
+            d   = (o.get('delivery_date') or '')[:10]
             amt = int(round(float(o.get('quantity') or 0))) * bp_price.get(o.get('product_id'), 0)
-            if m: bento_by_month[m] = bento_by_month.get(m,0) + amt
+            if d: bento_by_date[d] = bento_by_date.get(d,0) + amt
     if not rows:
         return jsonify({'year':year,'months':[],'summary':{'total_instore_sales':0,'total_bento_sales':0}})
     months = {}
@@ -814,7 +814,8 @@ def yearly_summary():
         m = d['date'][:7]
         if m not in months:
             months[m] = {'month':m,'total_sales':0,'total_labor':0,'total_profit':0,'total_hours':0,
-                         'op_days':0,'west_sales':0,'south_sales':0,'other_sales':0}
+                         'op_days':0,'west_sales':0,'south_sales':0,'other_sales':0,
+                         'instore_sales':0,'bento_sales':0}
         months[m]['total_sales']  += d.get('total_sales',0)  or 0
         months[m]['total_labor']  += d.get('labor_cost',0)   or 0
         months[m]['total_profit'] += d.get('profit',0)       or 0
@@ -823,14 +824,15 @@ def yearly_summary():
         months[m]['west_sales']   += d.get('west_sales',0)   or 0
         months[m]['south_sales']  += d.get('south_sales',0)  or 0
         months[m]['other_sales']  += d.get('other_sales',0)  or 0
+        # 注文/アプリ注文は「日報のある日」だけ加算（先付け注文や未作成日のキャッシュは除外）
+        months[m]['instore_sales'] += instore_by_date.get(d['date'], 0)
+        months[m]['bento_sales']   += bento_by_date.get(d['date'], 0)
     months_list = sorted(months.values(), key=lambda x: x['month'])
     for m in months_list:
         ts = m['total_sales']
         m['profit_rate']    = round(m['total_profit']/ts*100,1) if ts else 0
         m['labor_rate']     = round(m['total_labor']/ts*100,1)  if ts else 0
         m['avg_labor_prod'] = round(ts/m['total_hours'],0)      if m['total_hours'] else 0
-        m['instore_sales']  = instore_by_month.get(m['month'], 0)
-        m['bento_sales']    = bento_by_month.get(m['month'], 0)
     # 合計は「表示中の per-month 行」の総和にする（daily_report のない月を含めない）
     total_instore = sum(m['instore_sales'] for m in months_list)
     total_bento   = sum(m['bento_sales']   for m in months_list)
