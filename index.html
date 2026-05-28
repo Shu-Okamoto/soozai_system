@@ -1717,14 +1717,46 @@ async function saveMenus(weekStart) {
 }
 
 // ═══════════════════════════════════════════════
-// 発注（準備中）
+// 発注（入り口メニュー）
 // ═══════════════════════════════════════════════
+const DX_HONBU_ORDER_URL = 'https://dx.satonoaji-mikawa.net/store/honbu';
+
 function renderOrderPage() {
   document.getElementById('content').innerHTML = `
-    <div style="text-align:center;padding:80px 20px;color:var(--text2)">
-      <div style="font-size:64px;margin-bottom:16px">🛒</div>
-      <h2 style="font-size:22px;font-weight:700;margin-bottom:12px;color:var(--text)">発注機能は準備中です</h2>
-      <p style="font-size:14px">仕様が固まり次第こちらに実装します。</p>
+    <div style="max-width:640px;margin:32px auto;padding:0 16px">
+      <p style="color:var(--text2);margin-bottom:20px">発注の入り口を選択してください。</p>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <a href="${DX_HONBU_ORDER_URL}" target="_blank" rel="noopener"
+           style="display:flex;align-items:center;gap:16px;padding:20px;border:1px solid var(--border);border-radius:12px;background:#fff;text-decoration:none;color:inherit;transition:background .15s"
+           onmouseover="this.style.background='#F5F5F0'" onmouseout="this.style.background='#fff'">
+          <div style="font-size:36px">🥕</div>
+          <div style="flex:1">
+            <div style="font-size:18px;font-weight:700">野菜・果物発注</div>
+            <div style="font-size:13px;color:var(--text2);margin-top:2px">DX 本部発注ページへ（別タブで開く）</div>
+          </div>
+          <div style="font-size:20px;color:var(--text3)">↗</div>
+        </a>
+        <button onclick="renderOrderMaterialPage()"
+           style="display:flex;align-items:center;gap:16px;padding:20px;border:1px solid var(--border);border-radius:12px;background:#fff;text-align:left;cursor:pointer;font-family:inherit;color:inherit;transition:background .15s"
+           onmouseover="this.style.background='#F5F5F0'" onmouseout="this.style.background='#fff'">
+          <div style="font-size:36px">🍱</div>
+          <div style="flex:1">
+            <div style="font-size:18px;font-weight:700">原材料発注（惣菜）</div>
+            <div style="font-size:13px;color:var(--text2);margin-top:2px">惣菜ならではの原材料発注</div>
+          </div>
+        </button>
+      </div>
+    </div>`;
+}
+
+function renderOrderMaterialPage() {
+  document.getElementById('content').innerHTML = `
+    <div style="text-align:center;padding:60px 20px;color:var(--text2)">
+      <div style="font-size:64px;margin-bottom:16px">🍱</div>
+      <h2 style="font-size:22px;font-weight:700;margin-bottom:12px;color:var(--text)">原材料発注は準備中です</h2>
+      <p style="font-size:14px;margin-bottom:24px">仕様が固まり次第こちらに実装します。</p>
+      <button onclick="renderOrderPage()"
+        style="background:rgba(0,0,0,.05);border:1px solid var(--border);padding:8px 20px;border-radius:8px;cursor:pointer;font-family:inherit;color:inherit">← 発注メニューに戻る</button>
     </div>`;
 }
 
