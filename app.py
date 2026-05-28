@@ -981,7 +981,7 @@ def get_instore_orders():
     # status='active' のみ取り込み（cancelled 等は除外）
     try:
         dx_orders = sb_dx.table(DX_INSTORE_TABLE)\
-            .select(f'id,storeId,productName,quantity,customerName,status,price,{DX_DATE_COL}')\
+            .select(f'id,storeId,productName,quantity,customerName,status,price,category,{DX_DATE_COL}')\
             .eq(DX_DATE_COL, target_date).eq('status','active').execute().data
     except Exception as e:
         # dx 接続失敗時は hq のキャッシュにフォールバック
@@ -999,9 +999,12 @@ def get_instore_orders():
         dx_prods = []
     prod_map = {p['productName']: p for p in dx_prods}
 
-    # 餅カテゴリは取り込まない（マスタ category='餅' は弁当部門の対象外）
-    dx_orders = [o for o in dx_orders
-                 if (prod_map.get(o['productName']) or {}).get('category') != '餅']
+    # カテゴリ判定: マスタを優先、無ければ注文側（カスタム追加商品）
+    def _category_of(o):
+        return (prod_map.get(o['productName']) or {}).get('category') or o.get('category')
+
+    # 餅カテゴリは取り込まない（マスタ／カスタム追加とも対象外）
+    dx_orders = [o for o in dx_orders if _category_of(o) != '餅']
 
     mirror_rows = []
     for o in dx_orders:
@@ -1017,7 +1020,7 @@ def get_instore_orders():
             'customer_name': o.get('customerName') or '',
             'quantity':      int(o.get('quantity') or 0),
             'price':         int(round(float(unit_price))),
-            'category':      p.get('category') or '弁当',
+            'category':      p.get('category') or o.get('category') or '弁当',
             'source_id':     source_id,
         })
     # 既存キャッシュのうち、今回の active セットに無いもの（＝dx 側で cancelled/削除済）を除去
