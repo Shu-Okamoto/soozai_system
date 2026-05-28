@@ -930,7 +930,11 @@ async function renderActualPage() {
   const planMap  = {}; shiftPlans.forEach(s=>planMap[s.member_name]=s.planned_hours);
   // 予定あり or 実績あるメンバーを表示
   const displayNames = [...new Set([...Object.keys(planMap), ...Object.keys(shiftMap)])];
-  const shiftRows = displayNames.map(n=>buildShiftRowHTML(n, shiftMap[n]??'', wageMap[n]||0, planMap[n]||0)).join('');
+  // 実績未保存のメンバーは予定の時間数を初期値として表示
+  const shiftRows = displayNames.map(n => {
+    const initialHours = (n in shiftMap) ? shiftMap[n] : (planMap[n] || '');
+    return buildShiftRowHTML(n, initialHours, wageMap[n]||0, planMap[n]||0);
+  }).join('');
   // ドロップダウン：上記以外のマスタメンバー
   const dropdownOpts = cachedMembers
     .filter(m=>!displayNames.includes(m.name))
