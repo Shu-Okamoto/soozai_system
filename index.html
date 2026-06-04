@@ -145,6 +145,7 @@
       <button class="nav-item"        onclick="showPage('report')" id="nav-report">📊 売上日報</button>
       <button class="nav-item"        onclick="showPage('menu')"   id="nav-menu">🍱 週間献立表</button>
       <button class="nav-item"        onclick="showPage('order')"  id="nav-order">🛒 発注</button>
+      <button class="nav-item"        onclick="showPage('checklist')" id="nav-checklist">✅ チェックリスト</button>
     </div>
     <div class="nav-group admin-only">
       <div class="nav-label">管理者業務</div>
@@ -438,10 +439,10 @@ function showPage(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:'出荷先マスタ',members:'メンバーマスタ',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成'};
+  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:'出荷先マスタ',members:'メンバーマスタ',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成'};
   document.getElementById('page-title').textContent = titles[page]||'';
   ({plan:renderPlanPage,actual:renderActualPage,report:renderReportPage,
-    menu:renderMenuPage,order:renderOrderPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,members:renderMembersPage,
+    menu:renderMenuPage,order:renderOrderPage,checklist:renderChecklistPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,members:renderMembersPage,
     adminplan:renderAdminPlanPage,adminmenu:renderAdminMenuPage,adminshifts:renderAdminShiftsPage})[page]?.();
 }
 
@@ -1762,6 +1763,131 @@ function renderOrderMaterialPage() {
       <button onclick="renderOrderPage()"
         style="background:rgba(0,0,0,.05);border:1px solid var(--border);padding:8px 20px;border-radius:8px;cursor:pointer;font-family:inherit;color:inherit">← 発注メニューに戻る</button>
     </div>`;
+}
+
+// ═══════════════════════════════════════════════
+// チェックリスト（衛生管理：HACCPに沿った衛生管理 ＋ プラスアルファ）
+// ═══════════════════════════════════════════════
+// 日々のチェックリスト
+const CHECKLIST_DAILY = [
+  { cat:'一般衛生管理（HACCP）', items:[
+    {key:'d_recv',    label:'原材料の受入確認（鮮度・包装の状態・表示・期限・温度）'},
+    {key:'d_fridge',  label:'冷蔵庫・冷凍庫の庫内温度確認（冷蔵10℃以下／冷凍-15℃以下）'},
+    {key:'d_cross',   label:'交差汚染・二次汚染の防止（生肉・生魚と他食材の区分／専用器具）'},
+    {key:'d_wash',    label:'器具・容器・まな板・包丁の洗浄・消毒・殺菌'},
+    {key:'d_hand',    label:'衛生的な手洗いの実施（作業開始時・トイレ後・盛付前 等）'},
+    {key:'d_toilet',  label:'トイレの洗浄・消毒'},
+    {key:'d_health',  label:'従業員の健康状態確認（下痢・嘔吐・発熱・化膿した傷の有無）'},
+    {key:'d_wear',    label:'衛生的な服装・身だしなみ（清潔な作業着・帽子・マスク・爪）'},
+  ]},
+  { cat:'重要管理（CCP）', items:[
+    {key:'d_heat',    label:'加熱調理：中心温度75℃・1分以上（二枚貝等は85〜90℃・90秒以上）'},
+    {key:'d_cool',    label:'加熱後の速やかな冷却（中心温度を速やかに下げる）'},
+    {key:'d_keep',    label:'調理済み食品の保管温度管理（要冷蔵品の常温放置をしない）'},
+  ]},
+  { cat:'プラスアルファの衛生管理', items:[
+    {key:'d_5s',      label:'5S（整理・整頓・清掃・清潔・しつけ）の実施'},
+    {key:'d_allergen',label:'アレルゲンの管理（コンタミ防止・専用器具・表示確認）'},
+    {key:'d_foreign', label:'異物混入対策（毛髪・金属片・ガラス・ビニール片の点検）'},
+    {key:'d_label',   label:'食品表示・消費期限／賞味期限の確認'},
+    {key:'d_trash',   label:'廃棄物・生ゴミの適切な処理（ふた付き・速やかな搬出）'},
+  ]},
+];
+// 月のチェックリスト
+const CHECKLIST_MONTHLY = [
+  { cat:'設備・環境（HACCP）', items:[
+    {key:'m_thermo',  label:'冷蔵庫・冷凍庫の温度計の点検（表示の確認・必要に応じ校正）'},
+    {key:'m_clean',   label:'清掃が行き届きにくい箇所の清掃（換気扇・排水溝・冷蔵庫裏・天井）'},
+    {key:'m_pest',    label:'防虫・防その確認（ねずみ・昆虫の侵入痕跡・捕獲器の点検）'},
+    {key:'m_equip',   label:'調理機器・設備の点検（破損・劣化・パッキン・ガタつき）'},
+  ]},
+  { cat:'記録・管理（HACCP）', items:[
+    {key:'m_stock',   label:'在庫・期限切れ食材の点検と処分'},
+    {key:'m_record',  label:'日々の衛生管理記録の確認・保管（記入漏れの点検）'},
+    {key:'m_water',   label:'使用水の管理状況の確認（必要に応じ水質検査）'},
+  ]},
+  { cat:'プラスアルファの衛生管理', items:[
+    {key:'m_edu',     label:'従業員への衛生教育・研修の実施'},
+    {key:'m_kenben',  label:'検便（腸内細菌検査）の実施状況の確認'},
+    {key:'m_health',  label:'健康診断の実施状況の確認'},
+    {key:'m_manual',  label:'衛生管理マニュアル・手順書の見直し'},
+    {key:'m_claim',   label:'クレーム・異常事例の振り返りと再発防止の確認'},
+  ]},
+];
+
+let checklistMode = 'daily'; // 'daily' | 'monthly'
+
+function checklistDef(mode){ return mode === 'monthly' ? CHECKLIST_MONTHLY : CHECKLIST_DAILY; }
+function checklistPeriodKey(mode){ return mode === 'monthly' ? currentDate.slice(0,7) : currentDate; }
+
+function switchChecklist(mode){ checklistMode = mode; renderChecklistPage(); }
+
+async function renderChecklistPage() {
+  setLoading();
+  const mode       = checklistMode;
+  const periodKey  = checklistPeriodKey(mode);
+  const records    = await fetch(`${API}/checklist?period_type=${mode}&period_key=${periodKey}`).then(r=>r.json()).catch(()=>[]);
+  const checkedSet = new Set((records||[]).map(r=>r.item_key));
+  const lastBy     = (records||[]).map(r=>r.checked_by).find(x=>x) || '';
+
+  const groups = checklistDef(mode).map(g=>{
+    const items = g.items.map(it=>`
+      <label style="display:flex;align-items:flex-start;gap:10px;padding:11px 12px;border-bottom:1px solid var(--border);cursor:pointer">
+        <input type="checkbox" id="chk_${it.key}" ${checkedSet.has(it.key)?'checked':''}
+               style="width:20px;height:20px;margin-top:1px;flex-shrink:0;cursor:pointer;accent-color:var(--accent)">
+        <span style="font-size:14px;line-height:1.5">${it.label}</span>
+      </label>`).join('');
+    return `<div class="card mb-16">
+        <div class="card-header"><span class="card-title">${g.cat}</span></div>
+        <div>${items}</div>
+      </div>`;
+  }).join('');
+
+  const memberOpts = ['<option value="">― 記入者を選択 ―</option>']
+    .concat(cachedMembers.map(m=>`<option value="${m.name}" ${m.name===lastBy?'selected':''}>${m.name}</option>`))
+    .join('');
+
+  const dateLabel = mode==='monthly'
+    ? `${periodKey.slice(0,4)}年${periodKey.slice(5,7)}月`
+    : periodKey;
+
+  document.getElementById('content').innerHTML = `
+    <div style="max-width:820px;margin:0 auto">
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="btn ${mode==='daily'  ?'btn-primary':'btn-secondary'}" onclick="switchChecklist('daily')">📅 日々のチェックリスト</button>
+        <button class="btn ${mode==='monthly'?'btn-primary':'btn-secondary'}" onclick="switchChecklist('monthly')">🗓 月のチェックリスト</button>
+      </div>
+      <div class="card mb-16">
+        <div class="card-body" style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between">
+          <div style="font-size:14px;color:var(--text2)">
+            対象：<strong style="color:var(--text)">${dateLabel}</strong>
+            <span style="margin-left:8px">（${mode==='daily'?'日次':'月次'}の衛生管理）</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <label style="font-size:13px;color:var(--text2)">記入者</label>
+            <select id="checklist-by" style="min-width:150px">${memberOpts}</select>
+          </div>
+        </div>
+      </div>
+      ${groups}
+      <div style="display:flex;justify-content:flex-end;margin:8px 0 40px">
+        <button class="btn btn-primary" style="padding:10px 28px" onclick="saveChecklist()">💾 保存</button>
+      </div>
+    </div>`;
+}
+
+async function saveChecklist(){
+  const mode = checklistMode;
+  const by   = document.getElementById('checklist-by').value;
+  if (!by){ showToast('記入者を選択してください', true); return; }
+  const items = checklistDef(mode).flatMap(g=>g.items).map(it=>({
+    item_key: it.key,
+    checked:  document.getElementById('chk_'+it.key).checked
+  }));
+  const r = await fetch(`${API}/checklist`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({period_type:mode, period_key:checklistPeriodKey(mode), checked_by:by, items})
+  }).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) showToast('保存しました'); else showToast('保存失敗', true);
 }
 
 // ═══════════════════════════════════════════════

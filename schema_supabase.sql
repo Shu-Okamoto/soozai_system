@@ -117,6 +117,20 @@ CREATE TABLE IF NOT EXISTS hq_instore_orders (
     synced_at     TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS hq_instore_orders_date_idx ON hq_instore_orders (date);
+-- チェックリスト（衛生管理：HACCP＋α）
+-- period_type: 'daily' | 'monthly' / period_key: daily='YYYY-MM-DD', monthly='YYYY-MM'
+CREATE TABLE IF NOT EXISTS hq_checklist_records (
+    id          BIGSERIAL PRIMARY KEY,
+    period_type TEXT NOT NULL,
+    period_key  TEXT NOT NULL,
+    item_key    TEXT NOT NULL,
+    checked     BOOLEAN DEFAULT TRUE,
+    checked_by  TEXT DEFAULT '',
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (period_type, period_key, item_key)
+);
+CREATE INDEX IF NOT EXISTS hq_checklist_records_period_idx
+    ON hq_checklist_records (period_type, period_key);
 -- 初期データ（現行のハードコード値を再現）
 INSERT INTO hq_categories (name, sort_order) VALUES
     ('弁当', 1), ('寿司', 2), ('惣菜', 3), ('その他', 4)
