@@ -399,6 +399,29 @@ def update_member(mid):
     sb.table('hq_members').update({'name':d['name'],'hourly_wage':d.get('hourly_wage',0),'active':d.get('active',1)}).eq('id',mid).execute()
     return jsonify({'ok': True})
 
+# ─── チェックリスト（衛生管理：HACCP＋α） ──────
+# period_type: 'daily' | 'monthly'
+# period_key : daily='YYYY-MM-DD' / monthly='YYYY-MM'
+@app.route('/api/checklist', methods=['GET'])
+def get_checklist():
+    pt = request.args.get('period_type')
+    pk = request.args.get('period_key')
+    r = sb.table('hq_checklist_records').select('*').eq('period_type',pt).eq('period_key',pk).execute()
+    return jsonify(r.data)
+
+@app.route('/api/checklist', methods=['POST'])
+def save_checklist():
+    d  = request.json
+    pt = d['period_type']
+    pk = d['period_key']
+    by = d.get('checked_by','')
+    sb.table('hq_checklist_records').delete().eq('period_type',pt).eq('period_key',pk).execute()
+    rows = [{'period_type':pt,'period_key':pk,'item_key':it['item_key'],'checked':True,'checked_by':by}
+            for it in d.get('items',[]) if it.get('checked')]
+    if rows:
+        sb.table('hq_checklist_records').insert(rows).execute()
+    return jsonify({'ok': True})
+
 # ─── シフト ────────────────────────────────────
 @app.route('/api/shifts', methods=['GET'])
 def get_shifts():
