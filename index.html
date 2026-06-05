@@ -159,6 +159,10 @@
       <button class="nav-item" onclick="showPage('yearly')"  id="nav-yearly">📈 年次サマリ</button>
     </div>
     <div class="nav-group admin-only">
+      <div class="nav-label">データ管理</div>
+      <button class="nav-item" onclick="showPage('import')" id="nav-import">📥 売上実績取込</button>
+    </div>
+    <div class="nav-group admin-only">
       <div class="nav-label">マスタ</div>
       <button class="nav-item" onclick="showPage('master')"     id="nav-master">⚙️ 商品マスタ</button>
       <button class="nav-item" onclick="showPage('categories')" id="nav-categories">🏷 カテゴリマスタ</button>
@@ -439,11 +443,11 @@ function showPage(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:'出荷先マスタ',members:'メンバーマスタ',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成'};
+  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:'出荷先マスタ',members:'メンバーマスタ',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成',import:'売上実績取込'};
   document.getElementById('page-title').textContent = titles[page]||'';
   ({plan:renderPlanPage,actual:renderActualPage,report:renderReportPage,
     menu:renderMenuPage,order:renderOrderPage,checklist:renderChecklistPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,members:renderMembersPage,
-    adminplan:renderAdminPlanPage,adminmenu:renderAdminMenuPage,adminshifts:renderAdminShiftsPage})[page]?.();
+    adminplan:renderAdminPlanPage,adminmenu:renderAdminMenuPage,adminshifts:renderAdminShiftsPage,import:renderImportPage})[page]?.();
 }
 
 function setLoading() {
@@ -2653,6 +2657,214 @@ async function deleteMember(id) {
     body: JSON.stringify({name, hourly_wage: wage, active: 0})}).then(r=>r.json()).catch(()=>null);
   if (r?.ok) { showToast('削除しました'); renderMembersPage(); }
   else showToast('削除失敗', true);
+}
+
+// ═══════════════════════════════════════════════
+// 売上実績取込（過去データ・日次CSV）
+// CSV をブラウザでパース → プレビュー → /api/import/sales-actuals へ送信
+// ═══════════════════════════════════════════════
+const IMPORT_FIELDS = [
+  {key:'date',         label:'日付',     aliases:['日付','date','年月日','日にち'], required:true},
+  {key:'total_sales',  label:'売上合計', aliases:['売上合計','売上','total_sales','sales']},
+  {key:'west_sales',   label:'西店',     aliases:['西店','西','west_sales','west']},
+  {key:'south_sales',  label:'南店',     aliases:['南店','南','south_sales','south']},
+  {key:'other_sales',  label:'その他',   aliases:['その他','他','other_sales','other']},
+  {key:'labor_cost',   label:'人件費',   aliases:['人件費','labor_cost','labor']},
+  {key:'total_hours',  label:'総人時',   aliases:['総人時','人時','total_hours','hours']},
+  {key:'material_cost',label:'原価',     aliases:['原価','材料費','material_cost','material']},
+  {key:'expense',      label:'経費',     aliases:['経費','expense']},
+  {key:'profit',       label:'利益',     aliases:['利益','profit']},
+  {key:'weather',      label:'天気',     aliases:['天気','weather']},
+];
+let importRows = [];   // {row, ok, msg, data:{...}}
+
+function impNormHeader(h){ return String(h||'').replace(/\s/g,'').replace(/[（(].*?[)）]/g,'').toLowerCase(); }
+function impNum(v){
+  if(v==null) return null;
+  const s=String(v).replace(/[,¥円\s]/g,'').trim();
+  if(s==='') return null;
+  const n=Number(s); return isNaN(n)?NaN:n;
+}
+function impDate(v){
+  const s=String(v||'').trim().replace(/\//g,'-');
+  const m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(!m) return null;
+  return `${m[1]}-${String(+m[2]).padStart(2,'0')}-${String(+m[3]).padStart(2,'0')}`;
+}
+function parseCSV(text){
+  text = text.replace(/^﻿/, '');
+  const lines = text.split(/\r\n|\n|\r/).filter(l=>l.trim()!=='');
+  return lines.map(line=>{
+    const out=[]; let cur=''; let q=false;
+    for(let i=0;i<line.length;i++){
+      const ch=line[i];
+      if(q){ if(ch==='"'){ if(line[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=ch; }
+      else { if(ch==='"') q=true; else if(ch===','){out.push(cur);cur='';} else cur+=ch; }
+    }
+    out.push(cur); return out.map(c=>c.trim());
+  });
+}
+
+async function renderImportPage(){
+  importRows = [];
+  document.getElementById('content').innerHTML = `
+    <div class="card mb-16">
+      <div class="card-header"><span class="card-title">売上実績の取込（過去データ・日次）</span></div>
+      <div class="card-body">
+        <p class="text-muted" style="font-size:13px;line-height:1.7;margin-bottom:10px">
+          過去の売上実績を <b>日別（1日1行）</b> の CSV で取り込みます。月次・年次サマリは日別データを自動集計するため、取り込んだ瞬間に各サマリへ反映されます。<br>
+          取り込んだ日は<b>確定済み</b>として保存され、システムの自動再計算で上書きされません（後から編集したい場合は売上日報画面で確定解除できます）。
+        </p>
+        <ul class="text-muted" style="font-size:13px;line-height:1.8;margin:0 0 12px 18px">
+          <li>文字コードは <b>UTF-8</b>、1行目は見出し行。</li>
+          <li><b>日付</b>は必須（例 <code>2023-04-01</code> / <code>2023/4/1</code>）。その他の列は空欄なら 0 とみなします。</li>
+          <li><b>利益</b>が空欄なら「売上合計 − 原価 − 人件費 − 経費」で自動計算します。</li>
+        </ul>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-secondary btn-sm" onclick="downloadImportTemplate()">⬇ テンプレートCSVをダウンロード</button>
+          <label class="btn btn-primary btn-sm" style="cursor:pointer">
+            📁 CSVファイルを選択
+            <input type="file" accept=".csv,text/csv" style="display:none" onchange="handleImportFile(event)">
+          </label>
+        </div>
+      </div>
+    </div>
+    <div id="import-preview"></div>`;
+}
+
+function downloadImportTemplate(){
+  const header = IMPORT_FIELDS.map(f=>f.label).join(',');
+  const sample = '2023-04-01,250000,120000,90000,40000,45000,28,80000,12000,,晴';
+  const blob = new Blob(['﻿'+header+'\n'+sample+'\n'], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'sales_actuals_template.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function handleImportFile(ev){
+  const file = ev.target.files?.[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e => { processImportCSV(e.target.result); };
+  reader.readAsText(file, 'UTF-8');
+  ev.target.value = '';  // 同じファイルを再選択できるようにする
+}
+
+function processImportCSV(text){
+  const grid = parseCSV(text);
+  if(grid.length < 2){ showToast('データ行が見つかりません', true); return; }
+  // 見出し行から列インデックスを特定
+  const headers = grid[0].map(impNormHeader);
+  const colIdx = {};
+  for(const f of IMPORT_FIELDS){
+    const al = f.aliases.map(impNormHeader);
+    colIdx[f.key] = headers.findIndex(h => al.includes(h));
+  }
+  if(colIdx.date < 0){ showToast('「日付」列が見つかりません。テンプレートの見出しをご確認ください', true); return; }
+
+  importRows = [];
+  const seen = new Set();
+  for(let i=1;i<grid.length;i++){
+    const cells = grid[i];
+    const get = k => colIdx[k]>=0 ? (cells[colIdx[k]] ?? '') : '';
+    const rownum = i+1;
+    const d = impDate(get('date'));
+    if(!d){ importRows.push({row:rownum, ok:false, msg:'日付が不正', data:{date:get('date')}}); continue; }
+    if(seen.has(d)){ importRows.push({row:rownum, ok:false, msg:'日付が重複', data:{date:d}}); continue; }
+    seen.add(d);
+    const nums = {}; let badField = null;
+    for(const f of ['total_sales','west_sales','south_sales','other_sales','labor_cost','total_hours','material_cost','expense','profit']){
+      const v = impNum(get(f));
+      if(Number.isNaN(v)){ badField = f; break; }
+      nums[f] = v;  // null = 空欄
+    }
+    if(badField){ importRows.push({row:rownum, ok:false, msg:`「${IMPORT_FIELDS.find(x=>x.key===badField).label}」が数値ではありません`, data:{date:d}}); continue; }
+    const profitComputed = nums.profit==null;
+    const profit = profitComputed ? ((nums.total_sales||0)-(nums.material_cost||0)-(nums.labor_cost||0)-(nums.expense||0)) : nums.profit;
+    importRows.push({row:rownum, ok:true, profitComputed, data:{
+      _row:rownum, date:d, weather:get('weather'),
+      total_sales:nums.total_sales, west_sales:nums.west_sales, south_sales:nums.south_sales,
+      other_sales:nums.other_sales, labor_cost:nums.labor_cost, total_hours:nums.total_hours,
+      material_cost:nums.material_cost, expense:nums.expense, profit:nums.profit, _profitView:profit,
+    }});
+  }
+  renderImportPreview();
+}
+
+function renderImportPreview(){
+  const okRows  = importRows.filter(r=>r.ok);
+  const errRows = importRows.filter(r=>!r.ok);
+  const previewRows = importRows.slice(0, 100).map(r=>{
+    const d = r.data;
+    if(!r.ok) return `<tr style="background:#fdecea">
+      <td>${r.row}</td><td class="left">${d.date??''}</td>
+      <td colspan="9" style="color:var(--danger);text-align:left">⚠️ ${r.msg}</td></tr>`;
+    return `<tr>
+      <td>${r.row}</td><td class="left">${d.date}</td>
+      <td>${fmt(d.total_sales||0)}</td><td>${fmt(d.west_sales||0)}</td><td>${fmt(d.south_sales||0)}</td>
+      <td>${fmt(d.other_sales||0)}</td><td>${fmt(d.labor_cost||0)}</td><td>${(d.total_hours||0)}</td>
+      <td>${fmt(d.material_cost||0)}</td><td>${fmt(d.expense||0)}</td>
+      <td>${fmt(d._profitView||0)}${r.profitComputed?'<span class="text-muted" style="font-size:10px"> 自動</span>':''}</td></tr>`;
+  }).join('');
+
+  document.getElementById('import-preview').innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">プレビュー</span>
+        <span style="font-size:13px">取込可能 <b style="color:var(--accent)">${okRows.length}</b> 件 ／ エラー <b style="color:var(--danger)">${errRows.length}</b> 件</span>
+      </div>
+      <div class="card-body">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:12px">
+          <input type="checkbox" id="import-overwrite">
+          既存の確定済みデータも上書きする（通常はオフ。オフの場合、既に確定済みの日付はスキップされます）
+        </label>
+        <div class="table-wrap" style="max-height:460px;overflow:auto">
+          <table>
+            <thead><tr>
+              <th>行</th><th style="text-align:left">日付</th><th>売上合計</th><th>西店</th><th>南店</th>
+              <th>その他</th><th>人件費</th><th>総人時</th><th>原価</th><th>経費</th><th>利益</th>
+            </tr></thead>
+            <tbody>${previewRows || '<tr><td colspan="11" class="text-center text-muted" style="padding:20px">データなし</td></tr>'}</tbody>
+          </table>
+        </div>
+        ${importRows.length>100 ? `<p class="text-muted text-center" style="font-size:12px;margin-top:8px">先頭100件のみ表示（全${importRows.length}件）</p>`:''}
+        <div style="margin-top:14px;text-align:right">
+          <button class="btn btn-primary" onclick="executeImport()" ${okRows.length? '':'disabled'}>
+            📥 ${okRows.length}件を取り込む
+          </button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function executeImport(){
+  const okRows = importRows.filter(r=>r.ok);
+  if(!okRows.length){ showToast('取込可能なデータがありません', true); return; }
+  const overwrite = document.getElementById('import-overwrite')?.checked || false;
+  if(!confirm(`${okRows.length}件の売上実績を取り込みます。よろしいですか？`)) return;
+  const btn = event?.target; if(btn){ btn.disabled = true; btn.textContent = '取込中...'; }
+  const payload = {overwrite, rows: okRows.map(r=>r.data)};
+  const res = await fetch(`${API}/import/sales-actuals`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload)}).then(r=>r.json()).catch(()=>null);
+  if(!res?.ok){ showToast('取込に失敗しました', true); if(btn){btn.disabled=false;btn.textContent=`📥 ${okRows.length}件を取り込む`;} return; }
+  let msg = `${res.imported}件を取り込みました`;
+  if(res.skipped?.length) msg += ` ／ 既存確定のためスキップ ${res.skipped.length}件`;
+  showToast(msg);
+  document.getElementById('import-preview').innerHTML = `
+    <div class="card">
+      <div class="card-header"><span class="card-title">取込結果</span></div>
+      <div class="card-body" style="font-size:14px;line-height:1.9">
+        <div>✅ 取込件数：<b>${res.imported}</b> 件</div>
+        ${res.skipped?.length ? `<div>⏭ スキップ（既存確定済み・上書きオフ）：<b>${res.skipped.length}</b> 件<div class="text-muted" style="font-size:12px">${res.skipped.slice(0,30).join(', ')}${res.skipped.length>30?' …':''}</div></div>`:''}
+        ${res.errors?.length ? `<div style="color:var(--danger)">⚠️ サーバー側エラー：<b>${res.errors.length}</b> 件<div style="font-size:12px">${res.errors.slice(0,20).map(e=>`行${e.row}: ${e.msg}`).join('<br>')}</div></div>`:''}
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <button class="btn btn-secondary btn-sm" onclick="showPage('monthly')">📈 月次サマリで確認</button>
+          <button class="btn btn-secondary btn-sm" onclick="renderImportPage()">続けて取込む</button>
+        </div>
+      </div>
+    </div>`;
 }
 
 init();

@@ -142,3 +142,27 @@ SELECT c.id, s.name, s.sort_order FROM hq_categories c, (VALUES
     ('惣菜','天ぷら',5), ('惣菜','漬物',6), ('惣菜','和え物',7), ('惣菜','揚げ物',8), ('惣菜','その他',9)
 ) AS s(cat_name, name, sort_order) WHERE c.name = s.cat_name
 ON CONFLICT (category_id, name) DO NOTHING;
+
+-- ─── 売上実績の DX 参照用ビュー ────────────────
+-- 本部で取込んだ過去売上実績（hq_daily_reports）を DX 側システムから参照できるようにする。
+-- hq と dx は同一 Supabase DB 内の別スキーマなので、dx スキーマに read 専用ビューを置けば
+-- DX 側からは dx.sales_history として参照できる（取込APIは public.hq_daily_reports に書き込む）。
+CREATE OR REPLACE VIEW dx.sales_history AS
+SELECT
+    date,
+    weather,
+    total_sales,
+    west_sales,
+    south_sales,
+    other_sales,
+    labor_cost,
+    total_hours,
+    material_cost,
+    expense,
+    profit,
+    labor_productivity,
+    updated_at
+FROM public.hq_daily_reports;
+-- PostgREST/各ロールから読めるように SELECT 権限を付与
+GRANT USAGE ON SCHEMA dx TO anon, authenticated, service_role;
+GRANT SELECT ON dx.sales_history TO anon, authenticated, service_role;
