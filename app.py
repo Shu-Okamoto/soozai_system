@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from supabase import create_client
-import os, calendar, math
+import os, calendar, math, re
 from datetime import date, timedelta, datetime, timezone
 from dotenv import load_dotenv
 
@@ -716,6 +716,89 @@ def generate_daily_report(date_str):
             'west_sales':calc['west_sales'],'south_sales':calc['south_sales'],'other_sales':calc['other_sales'],'note':saved_note}
     sb.table('hq_daily_reports').upsert(data, on_conflict='date').execute()
     return jsonify({'ok': True, **calc})
+
+# ─── 売上実績の一括取込（過去データ・日次CSV由来） ──
+@app.route('/api/import/sales-actuals', methods=['POST'])
+def import_sales_actuals():
+    """過去の売上実績を日次で hq_daily_reports に取込む。
+    フロントで CSV をパースして得た rows(JSON) を受け取る。
+    月次/年次サマリは hq_daily_reports の各列を直接合算しているため、
+    日別行をそのまま入れるだけで集計に反映される（追加の集計ロジック不要）。
+    取込んだ行は確定済み(finalized_at)として保存する。これをしないと
+    get_daily_report の遅延確定で総売上等が 0 に再計算され消える。
+    """
+    payload   = request.json or {}
+    rows      = payload.get('rows') or []
+    overwrite = bool(payload.get('overwrite'))
+    if not rows:
+        return jsonify({'ok': False, 'error': 'no rows'}), 400
+
+    # 既存の確定済み日付（実運用で確定済みの本物の日報）は保護する
+    dates = list({str(r.get('date', '')).strip() for r in rows if r.get('date')})
+    existing_finalized = set()
+    for j in range(0, len(dates), 300):
+        chunk = dates[j:j+300]
+        ex = sb.table('hq_daily_reports').select('date,finalized_at').in_('date', chunk).execute().data
+        existing_finalized |= {e['date'] for e in ex if e.get('finalized_at')}
+
+    def num(v):
+        if v is None:
+            return None
+        s = re.sub(r'[,¥円\s]', '', str(v)).strip()
+        if s == '':
+            return None
+        try:
+            return float(s)
+        except ValueError:
+            return None
+
+    imported, skipped, errors, upserts, seen = [], [], [], [], set()
+    now = now_jst_iso()
+    for i, r in enumerate(rows):
+        rownum = r.get('_row', i + 1)
+        raw = str(r.get('date', '')).strip().replace('/', '-')
+        m = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})$', raw)
+        if not m:
+            errors.append({'row': rownum, 'date': raw, 'msg': '日付形式が不正（YYYY-MM-DD）'})
+            continue
+        d = f'{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}'
+        if d in seen:
+            errors.append({'row': rownum, 'date': d, 'msg': 'CSV内で日付が重複'})
+            continue
+        seen.add(d)
+        if d in existing_finalized and not overwrite:
+            skipped.append(d)
+            continue
+        total_sales   = int(round(num(r.get('total_sales'))   or 0))
+        west_sales    = int(round(num(r.get('west_sales'))    or 0))
+        south_sales   = int(round(num(r.get('south_sales'))   or 0))
+        other_sales   = int(round(num(r.get('other_sales'))   or 0))
+        labor_cost    = int(round(num(r.get('labor_cost'))    or 0))
+        total_hours   = round(num(r.get('total_hours'))       or 0, 2)
+        material_cost = int(round(num(r.get('material_cost')) or 0))
+        expense       = int(round(num(r.get('expense'))       or 0))
+        profit_raw    = num(r.get('profit'))
+        # 利益が空欄なら 売上 − 原価 − 人件費 − 経費 で自動計算する
+        profit = int(round(profit_raw)) if profit_raw is not None \
+            else (total_sales - material_cost - labor_cost - expense)
+        labor_prod = round(total_sales / total_hours, 0) if total_hours > 0 else 0
+        upserts.append({
+            'date': d, 'weather': str(r.get('weather', '') or ''),
+            'total_sales': total_sales, 'west_sales': west_sales,
+            'south_sales': south_sales, 'other_sales': other_sales,
+            'labor_cost': labor_cost, 'total_hours': total_hours,
+            'material_cost': material_cost, 'expense': expense,
+            'profit': profit, 'labor_productivity': labor_prod,
+            'actuals_snapshot': [], 'shifts_snapshot': [], 'channels_snapshot': [],
+            'finalized_at': now,
+        })
+        imported.append(d)
+
+    for j in range(0, len(upserts), 500):
+        sb.table('hq_daily_reports').upsert(upserts[j:j+500], on_conflict='date').execute()
+
+    return jsonify({'ok': True, 'imported': len(imported), 'imported_dates': imported,
+                    'skipped': skipped, 'errors': errors, 'overwrite': overwrite})
 
 # ─── 月次サマリ ────────────────────────────────
 def _month_range(ym):
