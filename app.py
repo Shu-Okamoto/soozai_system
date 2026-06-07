@@ -10,6 +10,16 @@ def today_jst():
     return datetime.now(JST).date()
 def now_jst_iso():
     return datetime.now(JST).isoformat()
+def finalize_ts(date_str):
+    """日報の確定時刻。過去日はその営業日の終了時刻(23:59:59 JST)を返し、
+    当日以降は現在時刻を返す。これにより、過去日の遅延確定や過去データの
+    取込でも『確定時刻＝現在時刻』にならず、その日報の営業日を反映する。"""
+    try:
+        if date_str < today_jst().isoformat():
+            return f'{date_str}T23:59:59+09:00'
+    except TypeError:
+        pass
+    return now_jst_iso()
 
 load_dotenv()
 
@@ -599,7 +609,7 @@ def finalize_report(date_str):
         'actuals_snapshot':  snap['actuals_detail'],
         'shifts_snapshot':   snap['shifts'],
         'channels_snapshot': snap['channels'],
-        'finalized_at':      now_jst_iso(),
+        'finalized_at':      finalize_ts(date_str),
     }
     sb.table('hq_daily_reports').upsert(data, on_conflict='date').execute()
     return True
@@ -753,7 +763,6 @@ def import_sales_actuals():
             return None
 
     imported, skipped, errors, upserts, seen = [], [], [], [], set()
-    now = now_jst_iso()
     for i, r in enumerate(rows):
         rownum = r.get('_row', i + 1)
         raw = str(r.get('date', '')).strip().replace('/', '-')
@@ -790,7 +799,7 @@ def import_sales_actuals():
             'material_cost': material_cost, 'expense': expense,
             'profit': profit, 'labor_productivity': labor_prod,
             'actuals_snapshot': [], 'shifts_snapshot': [], 'channels_snapshot': [],
-            'finalized_at': now,
+            'finalized_at': finalize_ts(d),
         })
         imported.append(d)
 
