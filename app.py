@@ -10,6 +10,16 @@ def today_jst():
     return datetime.now(JST).date()
 def now_jst_iso():
     return datetime.now(JST).isoformat()
+def finalize_ts(date_str):
+    """日報の確定時刻。過去日はその営業日の終了時刻(23:59:59 JST)を返し、
+    当日以降は現在時刻を返す。これにより、過去日の遅延確定や過去データの
+    取込でも『確定時刻＝現在時刻』にならず、その日報の営業日を反映する。"""
+    try:
+        if date_str < today_jst().isoformat():
+            return f'{date_str}T23:59:59+09:00'
+    except TypeError:
+        pass
+    return now_jst_iso()
 
 load_dotenv()
 
@@ -599,7 +609,7 @@ def finalize_report(date_str):
         'actuals_snapshot':  snap['actuals_detail'],
         'shifts_snapshot':   snap['shifts'],
         'channels_snapshot': snap['channels'],
-        'finalized_at':      now_jst_iso(),
+        'finalized_at':      finalize_ts(date_str),
     }
     sb.table('hq_daily_reports').upsert(data, on_conflict='date').execute()
     return True
@@ -671,6 +681,28 @@ def finalize_pending():
         if finalize_report(r['date']):
             finalized.append(r['date'])
     return jsonify({'ok': True, 'finalized': finalized, 'count': len(finalized)})
+
+@app.route('/api/admin/fix-finalized-timestamps', methods=['POST'])
+def fix_finalized_timestamps():
+    """既存の確定済み日報のうち過去日の finalized_at を、その営業日の
+    終了時刻(23:59:59 JST)へ補正する一回限りのメンテ用エンドポイント。
+    以前『確定時刻＝処理時刻(現在時刻)』で保存された行を営業日ベースに直す。"""
+    secret = os.environ.get('CRON_SECRET','')
+    if secret and request.headers.get('X-Cron-Secret') != secret:
+        return jsonify({'error':'unauthorized'}), 401
+    cutoff = today_jst().isoformat()
+    rows = sb.table('hq_daily_reports').select('date,finalized_at').lt('date',cutoff).execute().data
+    fixed = []
+    for r in rows:
+        cur = r.get('finalized_at')
+        if not cur:
+            continue
+        want = f"{r['date']}T23:59:59+09:00"
+        if str(cur).startswith(f"{r['date']}T23:59:59"):
+            continue  # 既に営業日終了時刻になっている
+        sb.table('hq_daily_reports').update({'finalized_at': want}).eq('date', r['date']).execute()
+        fixed.append(r['date'])
+    return jsonify({'ok': True, 'fixed': len(fixed)})
 
 @app.route('/api/daily-info/<date_str>', methods=['POST'])
 def save_daily_info(date_str):
@@ -753,7 +785,6 @@ def import_sales_actuals():
             return None
 
     imported, skipped, errors, upserts, seen = [], [], [], [], set()
-    now = now_jst_iso()
     for i, r in enumerate(rows):
         rownum = r.get('_row', i + 1)
         raw = str(r.get('date', '')).strip().replace('/', '-')
@@ -790,7 +821,7 @@ def import_sales_actuals():
             'material_cost': material_cost, 'expense': expense,
             'profit': profit, 'labor_productivity': labor_prod,
             'actuals_snapshot': [], 'shifts_snapshot': [], 'channels_snapshot': [],
-            'finalized_at': now,
+            'finalized_at': finalize_ts(d),
         })
         imported.append(d)
 
