@@ -682,6 +682,28 @@ def finalize_pending():
             finalized.append(r['date'])
     return jsonify({'ok': True, 'finalized': finalized, 'count': len(finalized)})
 
+@app.route('/api/admin/fix-finalized-timestamps', methods=['POST'])
+def fix_finalized_timestamps():
+    """既存の確定済み日報のうち過去日の finalized_at を、その営業日の
+    終了時刻(23:59:59 JST)へ補正する一回限りのメンテ用エンドポイント。
+    以前『確定時刻＝処理時刻(現在時刻)』で保存された行を営業日ベースに直す。"""
+    secret = os.environ.get('CRON_SECRET','')
+    if secret and request.headers.get('X-Cron-Secret') != secret:
+        return jsonify({'error':'unauthorized'}), 401
+    cutoff = today_jst().isoformat()
+    rows = sb.table('hq_daily_reports').select('date,finalized_at').lt('date',cutoff).execute().data
+    fixed = []
+    for r in rows:
+        cur = r.get('finalized_at')
+        if not cur:
+            continue
+        want = f"{r['date']}T23:59:59+09:00"
+        if str(cur).startswith(f"{r['date']}T23:59:59"):
+            continue  # 既に営業日終了時刻になっている
+        sb.table('hq_daily_reports').update({'finalized_at': want}).eq('date', r['date']).execute()
+        fixed.append(r['date'])
+    return jsonify({'ok': True, 'fixed': len(fixed)})
+
 @app.route('/api/daily-info/<date_str>', methods=['POST'])
 def save_daily_info(date_str):
     d = request.json
