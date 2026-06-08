@@ -39,7 +39,53 @@ sb_dx = create_client(
 )
 sb_dx.postgrest.schema('dx')
 
-MONTHLY_FIXED_COST = 300000
+MONTHLY_FIXED_COST = 300000   # 部署 config に monthly_fixed_cost が無い場合のフォールバック
+
+# ─── 部署(department) 解決 [Phase 2] ───────────────
+# フロントは全リクエストに ?dept=<code> を付与する。未指定時は弁当部にフォールバック
+# （フロント未対応のうちは常に弁当部＝従来どおりの挙動）。
+DEFAULT_DEPT_CODE = 'bento'
+# hq_departments が未適用/未読込のときのフォールバック。弁当部の従来挙動を保つため
+# 全機能ONの config を持たせる（DBに部署が在ればそちらが優先される）。
+_FALLBACK_DEPT = {
+    'id': 1, 'code': 'bento', 'name': '弁当惣菜部',
+    'config': {
+        'monthly_fixed_cost': MONTHLY_FIXED_COST, 'material_rate': 0.5,
+        'sales_split': {'west': '西店', 'south': '南店'},
+        'features': {'weekly_menu': True, 'order_calc': True, 'dx_orders': True,
+                     'npo_adjust': True, 'separate_orders': True},
+    },
+}
+_DEPT_BY_CODE = {}
+
+def _refresh_departments():
+    global _DEPT_BY_CODE
+    try:
+        rows = sb.table('hq_departments').select('*').execute().data or []
+        _DEPT_BY_CODE = {r['code']: r for r in rows}
+    except Exception:
+        _DEPT_BY_CODE = {}
+    return _DEPT_BY_CODE
+
+def get_dept(code=None):
+    """リクエスト(?dept= または X-Department ヘッダ)から部署を解決して dict を返す。"""
+    if code is None:
+        try:
+            code = request.args.get('dept') or request.headers.get('X-Department')
+        except RuntimeError:        # request コンテキスト外（cron 等）
+            code = None
+    code = code or DEFAULT_DEPT_CODE
+    if code not in _DEPT_BY_CODE:
+        _refresh_departments()
+    return (_DEPT_BY_CODE.get(code)
+            or _DEPT_BY_CODE.get(DEFAULT_DEPT_CODE)
+            or _FALLBACK_DEPT)
+
+def dept_id(code=None):
+    return get_dept(code)['id']
+
+def dept_config(d=None):
+    return (d or get_dept()).get('config') or {}
 
 # ─── 祝日・経費計算 ────────────────────────────
 _SHUNBUN = {2023:21,2024:20,2025:20,2026:20,2027:21,2028:20,2029:20,2030:20}
@@ -64,20 +110,28 @@ def calc_working_days(year, month):
     return sum(1 for d in range(1,days+1)
                if date(year,month,d).weekday()!=6 and date(year,month,d) not in holidays)
 
-def daily_expense(target_date_str):
+def daily_expense(target_date_str, monthly_fixed_cost=None):
     dt = datetime.strptime(target_date_str, '%Y-%m-%d')
     wd = calc_working_days(dt.year, dt.month)
-    return math.ceil(MONTHLY_FIXED_COST / wd) if wd > 0 else MONTHLY_FIXED_COST
+    fixed = MONTHLY_FIXED_COST if monthly_fixed_cost is None else monthly_fixed_cost
+    return math.ceil(fixed / wd) if wd > 0 else fixed
 
 # ─── フロントエンド配信 ────────────────────────
 @app.route('/')
 def index():
     return send_file(os.path.join(os.path.dirname(__file__), 'index.html'))
 
+# ─── 部署マスタ（フロントの部署セレクタ・機能フラグ用）──
+@app.route('/api/departments', methods=['GET'])
+def get_departments():
+    rows = sb.table('hq_departments').select('id,code,name,sort_order,active,config')\
+        .eq('active',1).order('sort_order').execute().data
+    return jsonify(rows)
+
 # ─── 商品マスタ ───────────────────────────────
 @app.route('/api/products', methods=['GET'])
 def get_products():
-    q = sb.table('hq_products').select('*')
+    q = sb.table('hq_products').select('*').eq('department_id', dept_id())
     if request.args.get('include_inactive') != '1':
         q = q.eq('active',1)
     r = q.order('category').order('id').execute()
@@ -86,39 +140,40 @@ def get_products():
 @app.route('/api/products', methods=['POST'])
 def add_product():
     d = request.json
-    sb.table('hq_products').insert({'name':d['name'],'price':d['price'],'category':d['category'],'subcategory':d.get('subcategory','')}).execute()
+    sb.table('hq_products').insert({'name':d['name'],'price':d['price'],'category':d['category'],'subcategory':d.get('subcategory',''),'department_id':dept_id()}).execute()
     return jsonify({'ok': True})
 
 @app.route('/api/products/<int:pid>', methods=['PUT'])
 def update_product(pid):
     d = request.json
-    sb.table('hq_products').update({'name':d['name'],'price':d['price'],'category':d['category'],'subcategory':d.get('subcategory',''),'active':d.get('active',1)}).eq('id',pid).execute()
+    sb.table('hq_products').update({'name':d['name'],'price':d['price'],'category':d['category'],'subcategory':d.get('subcategory',''),'active':d.get('active',1)}).eq('id',pid).eq('department_id',dept_id()).execute()
     return jsonify({'ok': True})
 
 # ─── 出荷先マスタ ─────────────────────────────
 @app.route('/api/channels', methods=['GET'])
 def get_channels():
-    r = sb.table('hq_channels').select('*').eq('active',1).order('sort_order').execute()
+    r = sb.table('hq_channels').select('*').eq('department_id',dept_id()).eq('active',1).order('sort_order').execute()
     return jsonify(r.data)
 
 @app.route('/api/channels', methods=['POST'])
 def add_channel():
     d = request.json
-    r = sb.table('hq_channels').select('sort_order').order('sort_order', desc=True).limit(1).execute()
+    did = dept_id()
+    r = sb.table('hq_channels').select('sort_order').eq('department_id',did).order('sort_order', desc=True).limit(1).execute()
     max_order = r.data[0]['sort_order'] if r.data else 0
-    sb.table('hq_channels').insert({'name':d['name'],'sort_order':max_order+1}).execute()
+    sb.table('hq_channels').insert({'name':d['name'],'sort_order':max_order+1,'department_id':did}).execute()
     return jsonify({'ok': True})
 
 @app.route('/api/channels/<int:cid>', methods=['PUT'])
 def update_channel(cid):
     d = request.json
-    sb.table('hq_channels').update({'name':d['name'],'sort_order':d.get('sort_order',0),'active':d.get('active',1)}).eq('id',cid).execute()
+    sb.table('hq_channels').update({'name':d['name'],'sort_order':d.get('sort_order',0),'active':d.get('active',1)}).eq('id',cid).eq('department_id',dept_id()).execute()
     return jsonify({'ok': True})
 
 # ─── カテゴリマスタ ───────────────────────────
 @app.route('/api/categories', methods=['GET'])
 def get_categories():
-    q = sb.table('hq_categories').select('*')
+    q = sb.table('hq_categories').select('*').eq('department_id',dept_id())
     if request.args.get('include_inactive') != '1':
         q = q.eq('active',1)
     r = q.order('sort_order').order('id').execute()
@@ -130,10 +185,11 @@ def add_category():
     name = (d.get('name') or '').strip()
     if not name:
         return jsonify({'ok': False, 'error': 'カテゴリ名が空です'}), 400
-    r = sb.table('hq_categories').select('sort_order').order('sort_order', desc=True).limit(1).execute()
+    did = dept_id()
+    r = sb.table('hq_categories').select('sort_order').eq('department_id',did).order('sort_order', desc=True).limit(1).execute()
     max_order = r.data[0]['sort_order'] if r.data else 0
     try:
-        sb.table('hq_categories').insert({'name':name,'sort_order':max_order+1}).execute()
+        sb.table('hq_categories').insert({'name':name,'sort_order':max_order+1,'department_id':did}).execute()
     except Exception as e:
         return jsonify({'ok': False, 'error': '同名のカテゴリが既にあります'}), 400
     return jsonify({'ok': True})
@@ -141,37 +197,39 @@ def add_category():
 @app.route('/api/categories/<int:cid>', methods=['PUT'])
 def update_category(cid):
     d = request.json
+    did = dept_id()
     new_name = (d.get('name') or '').strip()
     if not new_name:
         return jsonify({'ok': False, 'error': 'カテゴリ名が空です'}), 400
-    old = sb.table('hq_categories').select('name').eq('id',cid).execute().data
+    old = sb.table('hq_categories').select('name').eq('id',cid).eq('department_id',did).execute().data
     if not old:
         return jsonify({'ok': False, 'error': 'not found'}), 404
     old_name = old[0]['name']
     sb.table('hq_categories').update({
         'name':new_name,'sort_order':d.get('sort_order',0),'active':d.get('active',1)
-    }).eq('id',cid).execute()
-    # リネーム時は使用中商品もカスケード更新
+    }).eq('id',cid).eq('department_id',did).execute()
+    # リネーム時は使用中商品もカスケード更新（同一部署内のみ）
     if old_name != new_name:
-        sb.table('hq_products').update({'category':new_name}).eq('category',old_name).execute()
+        sb.table('hq_products').update({'category':new_name}).eq('category',old_name).eq('department_id',did).execute()
     return jsonify({'ok': True})
 
 @app.route('/api/categories/<int:cid>', methods=['DELETE'])
 def delete_category(cid):
-    r = sb.table('hq_categories').select('name').eq('id',cid).execute().data
+    did = dept_id()
+    r = sb.table('hq_categories').select('name').eq('id',cid).eq('department_id',did).execute().data
     if not r:
         return jsonify({'ok': False, 'error': 'not found'}), 404
     name = r[0]['name']
-    used = sb.table('hq_products').select('id').eq('category',name).execute().data
+    used = sb.table('hq_products').select('id').eq('category',name).eq('department_id',did).execute().data
     if used:
         return jsonify({'ok': False, 'error': f'使用中の商品が{len(used)}件あるため削除できません'}), 400
     sb.table('hq_subcategories').delete().eq('category_id',cid).execute()
-    sb.table('hq_categories').delete().eq('id',cid).execute()
+    sb.table('hq_categories').delete().eq('id',cid).eq('department_id',did).execute()
     return jsonify({'ok': True})
 
 @app.route('/api/subcategories', methods=['GET'])
 def get_subcategories():
-    q = sb.table('hq_subcategories').select('*')
+    q = sb.table('hq_subcategories').select('*').eq('department_id',dept_id())
     if request.args.get('include_inactive') != '1':
         q = q.eq('active',1)
     cat_id = request.args.get('category_id')
@@ -187,10 +245,11 @@ def add_subcategory():
     cat_id = d.get('category_id')
     if not name or not cat_id:
         return jsonify({'ok': False, 'error': 'カテゴリ・サブカテゴリ名が必要です'}), 400
+    did = dept_id()
     r = sb.table('hq_subcategories').select('sort_order').eq('category_id',cat_id).order('sort_order', desc=True).limit(1).execute()
     max_order = r.data[0]['sort_order'] if r.data else 0
     try:
-        sb.table('hq_subcategories').insert({'category_id':cat_id,'name':name,'sort_order':max_order+1}).execute()
+        sb.table('hq_subcategories').insert({'category_id':cat_id,'name':name,'sort_order':max_order+1,'department_id':did}).execute()
     except Exception:
         return jsonify({'ok': False, 'error': '同名のサブカテゴリが既にあります'}), 400
     return jsonify({'ok': True})
@@ -201,48 +260,51 @@ def update_subcategory(sid):
     new_name = (d.get('name') or '').strip()
     if not new_name:
         return jsonify({'ok': False, 'error': 'サブカテゴリ名が空です'}), 400
-    old = sb.table('hq_subcategories').select('name,category_id').eq('id',sid).execute().data
+    did = dept_id()
+    old = sb.table('hq_subcategories').select('name,category_id').eq('id',sid).eq('department_id',did).execute().data
     if not old:
         return jsonify({'ok': False, 'error': 'not found'}), 404
     old_name = old[0]['name']
     cat_id   = old[0]['category_id']
     sb.table('hq_subcategories').update({
         'name':new_name,'sort_order':d.get('sort_order',0),'active':d.get('active',1)
-    }).eq('id',sid).execute()
+    }).eq('id',sid).eq('department_id',did).execute()
     # 同カテゴリ内のリネームのみカスケード
     if old_name != new_name:
         cat = sb.table('hq_categories').select('name').eq('id',cat_id).execute().data
         if cat:
-            sb.table('hq_products').update({'subcategory':new_name}).eq('category',cat[0]['name']).eq('subcategory',old_name).execute()
+            sb.table('hq_products').update({'subcategory':new_name}).eq('category',cat[0]['name']).eq('subcategory',old_name).eq('department_id',did).execute()
     return jsonify({'ok': True})
 
 @app.route('/api/subcategories/<int:sid>', methods=['DELETE'])
 def delete_subcategory(sid):
-    r = sb.table('hq_subcategories').select('name,category_id').eq('id',sid).execute().data
+    did = dept_id()
+    r = sb.table('hq_subcategories').select('name,category_id').eq('id',sid).eq('department_id',did).execute().data
     if not r:
         return jsonify({'ok': False, 'error': 'not found'}), 404
     name   = r[0]['name']
     cat_id = r[0]['category_id']
     cat = sb.table('hq_categories').select('name').eq('id',cat_id).execute().data
     if cat:
-        used = sb.table('hq_products').select('id').eq('category',cat[0]['name']).eq('subcategory',name).execute().data
+        used = sb.table('hq_products').select('id').eq('category',cat[0]['name']).eq('subcategory',name).eq('department_id',did).execute().data
         if used:
             return jsonify({'ok': False, 'error': f'使用中の商品が{len(used)}件あるため削除できません'}), 400
-    sb.table('hq_subcategories').delete().eq('id',sid).execute()
+    sb.table('hq_subcategories').delete().eq('id',sid).eq('department_id',did).execute()
     return jsonify({'ok': True})
 
 # ─── 週間献立 ──────────────────────────────────
 @app.route('/api/weekly-menus', methods=['GET'])
 def get_weekly_menus():
     week_start = request.args.get('week_start')
-    r = sb.table('hq_weekly_menus').select('*').eq('week_start',week_start).order('day_of_week').order('id').execute()
+    r = sb.table('hq_weekly_menus').select('*').eq('department_id',dept_id()).eq('week_start',week_start).order('day_of_week').order('id').execute()
     return jsonify(r.data)
 
 @app.route('/api/weekly-menus', methods=['POST'])
 def save_weekly_menus():
     d = request.json
-    sb.table('hq_weekly_menus').delete().eq('week_start',d['week_start']).execute()
-    rows = [{'week_start':d['week_start'],'day_of_week':m['day_of_week'],'category':m['category'],'menu_name':m['menu_name']}
+    did = dept_id()
+    sb.table('hq_weekly_menus').delete().eq('department_id',did).eq('week_start',d['week_start']).execute()
+    rows = [{'week_start':d['week_start'],'day_of_week':m['day_of_week'],'category':m['category'],'menu_name':m['menu_name'],'department_id':did}
             for m in d['menus'] if m.get('menu_name','').strip()]
     if rows:
         sb.table('hq_weekly_menus').insert(rows).execute()
@@ -251,10 +313,11 @@ def save_weekly_menus():
 @app.route('/api/weekly-menus/week-copy', methods=['POST'])
 def copy_weekly_menus():
     d = request.json
+    did = dept_id()
     src, dst = d['src_start'], d['dst_start']
-    r = sb.table('hq_weekly_menus').select('*').eq('week_start',src).execute()
-    sb.table('hq_weekly_menus').delete().eq('week_start',dst).execute()
-    rows = [{'week_start':dst,'day_of_week':m['day_of_week'],'category':m['category'],'menu_name':m['menu_name']} for m in r.data]
+    r = sb.table('hq_weekly_menus').select('*').eq('department_id',did).eq('week_start',src).execute()
+    sb.table('hq_weekly_menus').delete().eq('department_id',did).eq('week_start',dst).execute()
+    rows = [{'week_start':dst,'day_of_week':m['day_of_week'],'category':m['category'],'menu_name':m['menu_name'],'department_id':did} for m in r.data]
     if rows:
         sb.table('hq_weekly_menus').insert(rows).execute()
     return jsonify({'ok': True, 'copied': len(rows)})
@@ -264,7 +327,7 @@ def copy_weekly_menus():
 def get_shipping_plans():
     date_from = request.args.get('date_from')
     date_to   = request.args.get('date_to', date_from)
-    plans = sb.table('hq_shipping_plans').select('*').gte('date',date_from).lte('date',date_to).execute().data
+    plans = sb.table('hq_shipping_plans').select('*').eq('department_id',dept_id()).gte('date',date_from).lte('date',date_to).execute().data
     if not plans:
         return jsonify([])
     pids = list({p['product_id'] for p in plans})
@@ -290,11 +353,12 @@ def bulk_save_plans():
     else:
         items = payload.get('items', [])
         dates = payload.get('dates') or list({d['date'] for d in items})
+    did = dept_id()
     # スパース化：送信日付の既存行を一度全削除し、planned_qty>0 のみ再挿入する。
     for date in dates:
-        sb.table('hq_shipping_plans').delete().eq('date',date).execute()
+        sb.table('hq_shipping_plans').delete().eq('department_id',did).eq('date',date).execute()
     rows = [{'date':d['date'],'product_id':d['product_id'],'channel_id':d['channel_id'],
-             'planned_qty':d['planned_qty'],'note':d.get('note','')}
+             'planned_qty':d['planned_qty'],'note':d.get('note',''),'department_id':did}
             for d in items if d['planned_qty'] > 0]
     if rows:
         sb.table('hq_shipping_plans').insert(rows).execute()
@@ -304,6 +368,7 @@ def bulk_save_plans():
 def copy_week_plan():
     d         = request.json
     src_from  = d['src_from']; src_to = d['src_to']; dst_from = d['dst_from']
+    did       = dept_id()
     diff      = (datetime.strptime(dst_from,'%Y-%m-%d') - datetime.strptime(src_from,'%Y-%m-%d')).days
     # Supabase のデフォルト1000行制限に当たって週後半（金・土）が欠ける問題を避けるため
     # 日付ごとにクエリを分割。planned_qty=0 の行はコピー対象外。
@@ -312,10 +377,10 @@ def copy_week_plan():
     end = datetime.strptime(src_to,  '%Y-%m-%d')
     while cur <= end:
         day_str = cur.strftime('%Y-%m-%d')
-        rows.extend(sb.table('hq_shipping_plans').select('*').eq('date',day_str).gt('planned_qty',0).execute().data)
+        rows.extend(sb.table('hq_shipping_plans').select('*').eq('department_id',did).eq('date',day_str).gt('planned_qty',0).execute().data)
         cur += timedelta(days=1)
     new_rows  = [{'date':(datetime.strptime(r['date'],'%Y-%m-%d')+timedelta(days=diff)).strftime('%Y-%m-%d'),
-                  'product_id':r['product_id'],'channel_id':r['channel_id'],'planned_qty':r['planned_qty']} for r in rows]
+                  'product_id':r['product_id'],'channel_id':r['channel_id'],'planned_qty':r['planned_qty'],'department_id':did} for r in rows]
     if new_rows:
         sb.table('hq_shipping_plans').upsert(new_rows, on_conflict='date,product_id,channel_id').execute()
     return jsonify({'ok': True, 'copied': len(rows)})
@@ -324,8 +389,9 @@ def copy_week_plan():
 @app.route('/api/shipping-actuals', methods=['GET'])
 def get_shipping_actuals():
     target_date = request.args.get('date')
-    actuals = sb.table('hq_shipping_actuals').select('*').eq('date',target_date).execute().data
-    plans   = sb.table('hq_shipping_plans').select('product_id,channel_id,planned_qty').eq('date',target_date).execute().data
+    did = dept_id()
+    actuals = sb.table('hq_shipping_actuals').select('*').eq('department_id',did).eq('date',target_date).execute().data
+    plans   = sb.table('hq_shipping_plans').select('product_id,channel_id,planned_qty').eq('department_id',did).eq('date',target_date).execute().data
     plan_map = {(p['product_id'],p['channel_id']):p['planned_qty'] for p in plans}
     if not actuals:
         return jsonify([])
@@ -345,11 +411,12 @@ def get_shipping_actuals():
 @app.route('/api/shipping-actuals/init', methods=['POST'])
 def init_actuals_from_plan():
     target_date = request.json.get('date')
-    plans = sb.table('hq_shipping_plans').select('*').eq('date',target_date).gt('planned_qty',0).execute().data
+    did = dept_id()
+    plans = sb.table('hq_shipping_plans').select('*').eq('department_id',did).eq('date',target_date).gt('planned_qty',0).execute().data
     pids  = list({p['product_id'] for p in plans})
     prods = {p['id']:p for p in sb.table('hq_products').select('id,price').in_('id',pids).execute().data} if pids else {}
     rows  = [{'date':target_date,'product_id':p['product_id'],'channel_id':p['channel_id'],
-              'actual_qty':p['planned_qty'],'actual_amount':p['planned_qty']*prods.get(p['product_id'],{}).get('price',0)} for p in plans]
+              'actual_qty':p['planned_qty'],'actual_amount':p['planned_qty']*prods.get(p['product_id'],{}).get('price',0),'department_id':did} for p in plans]
     if rows:
         sb.table('hq_shipping_actuals').upsert(rows, on_conflict='date,product_id,channel_id').execute()
     return jsonify({'ok': True})
@@ -364,6 +431,7 @@ def bulk_save_actuals():
     else:
         items = payload.get('items', [])
         dates = payload.get('dates') or list({d['date'] for d in items})
+    dep = get_dept(); did = dep['id']; cfg = dep.get('config') or {}
     pids  = list({d['product_id'] for d in items})
     prods = {p['id']:p['price'] for p in sb.table('hq_products').select('id,price').in_('id',pids).execute().data} if pids else {}
     def price_of(d):
@@ -371,9 +439,9 @@ def bulk_save_actuals():
         return up if up is not None and up != '' else prods.get(d['product_id'], 0)
     # スパース化：送信日付の既存行を一度削除し、actual_qty>0 の行だけ再挿入する。
     for date in dates:
-        sb.table('hq_shipping_actuals').delete().eq('date',date).execute()
+        sb.table('hq_shipping_actuals').delete().eq('department_id',did).eq('date',date).execute()
     rows = [{'date':d['date'],'product_id':d['product_id'],'channel_id':d['channel_id'],
-             'actual_qty':d['actual_qty'],'actual_amount':d['actual_qty']*price_of(d)}
+             'actual_qty':d['actual_qty'],'actual_amount':d['actual_qty']*price_of(d),'department_id':did}
             for d in items if d['actual_qty'] > 0]
     if rows:
         sb.table('hq_shipping_actuals').insert(rows).execute()
@@ -384,11 +452,11 @@ def bulk_save_actuals():
     sync_keys = ['total_sales','material_cost','labor_cost','expense','profit','labor_productivity',
                  'total_hours','west_sales','south_sales','other_sales','separate_orders']
     for date in dates:
-        stored = sb.table('hq_daily_reports').select('expense,finalized_at').eq('date',date).execute().data
+        stored = sb.table('hq_daily_reports').select('expense,finalized_at').eq('department_id',did).eq('date',date).execute().data
         if not stored or stored[0].get('finalized_at'):
             continue
-        calc = calc_daily_report(date, expense_override=stored[0].get('expense'))
-        sb.table('hq_daily_reports').update({k:calc[k] for k in sync_keys}).eq('date',date).execute()
+        calc = calc_daily_report(date, did, cfg, expense_override=stored[0].get('expense'))
+        sb.table('hq_daily_reports').update({k:calc[k] for k in sync_keys}).eq('department_id',did).eq('date',date).execute()
     return jsonify({'ok': True})
 
 # ─── メンバーマスタ ───────────────────────────
@@ -416,17 +484,18 @@ def update_member(mid):
 def get_checklist():
     pt = request.args.get('period_type')
     pk = request.args.get('period_key')
-    r = sb.table('hq_checklist_records').select('*').eq('period_type',pt).eq('period_key',pk).execute()
+    r = sb.table('hq_checklist_records').select('*').eq('department_id',dept_id()).eq('period_type',pt).eq('period_key',pk).execute()
     return jsonify(r.data)
 
 @app.route('/api/checklist', methods=['POST'])
 def save_checklist():
     d  = request.json
+    did = dept_id()
     pt = d['period_type']
     pk = d['period_key']
     by = d.get('checked_by','')
-    sb.table('hq_checklist_records').delete().eq('period_type',pt).eq('period_key',pk).execute()
-    rows = [{'period_type':pt,'period_key':pk,'item_key':it['item_key'],'checked':True,'checked_by':by}
+    sb.table('hq_checklist_records').delete().eq('department_id',did).eq('period_type',pt).eq('period_key',pk).execute()
+    rows = [{'period_type':pt,'period_key':pk,'item_key':it['item_key'],'checked':True,'checked_by':by,'department_id':did}
             for it in d.get('items',[]) if it.get('checked')]
     if rows:
         sb.table('hq_checklist_records').insert(rows).execute()
@@ -435,33 +504,34 @@ def save_checklist():
 # ─── シフト ────────────────────────────────────
 @app.route('/api/shifts', methods=['GET'])
 def get_shifts():
-    r = sb.table('hq_shifts').select('*').eq('date',request.args.get('date')).order('member_name').execute()
+    r = sb.table('hq_shifts').select('*').eq('department_id',dept_id()).eq('date',request.args.get('date')).order('member_name').execute()
     return jsonify(r.data)
 
 @app.route('/api/shifts', methods=['POST'])
 def save_shifts():
     d = request.json
+    dep = get_dept(); did = dep['id']; cfg = dep.get('config') or {}
     date = d['date']
-    sb.table('hq_shifts').delete().eq('date',date).execute()
-    rows = [{'date':date,'member_name':s['member_name'],'hours':s['hours']}
+    sb.table('hq_shifts').delete().eq('department_id',did).eq('date',date).execute()
+    rows = [{'date':date,'member_name':s['member_name'],'hours':s['hours'],'department_id':did}
             for s in d['shifts'] if s.get('member_name','').strip() and s.get('hours',0)>0]
     if rows:
         sb.table('hq_shifts').insert(rows).execute()
 
     # 既存日報があれば自動で再生成（人件費・利益・人時売を実績と一致させる）
     # 確定済みは上書きしない
-    stored = sb.table('hq_daily_reports').select('expense,finalized_at').eq('date',date).execute().data
+    stored = sb.table('hq_daily_reports').select('expense,finalized_at').eq('department_id',did).eq('date',date).execute().data
     if stored and not stored[0].get('finalized_at'):
-        calc = calc_daily_report(date, expense_override=stored[0].get('expense'))
+        calc = calc_daily_report(date, did, cfg, expense_override=stored[0].get('expense'))
         sync_keys = ['total_sales','material_cost','labor_cost','expense','profit','labor_productivity',
                      'total_hours','west_sales','south_sales','other_sales','separate_orders']
-        sb.table('hq_daily_reports').update({k:calc[k] for k in sync_keys}).eq('date',date).execute()
+        sb.table('hq_daily_reports').update({k:calc[k] for k in sync_keys}).eq('department_id',did).eq('date',date).execute()
     return jsonify({'ok': True})
 
 # ─── シフト週次管理（予定） ────────────────────
 @app.route('/api/shift-plans', methods=['GET'])
 def get_shift_plans():
-    r = sb.table('hq_shift_plans').select('*').eq('date',request.args.get('date')).order('member_name').execute()
+    r = sb.table('hq_shift_plans').select('*').eq('department_id',dept_id()).eq('date',request.args.get('date')).order('member_name').execute()
     return jsonify(r.data)
 
 @app.route('/api/shifts/week', methods=['GET'])
@@ -469,16 +539,17 @@ def get_shifts_week():
     week_start = request.args.get('week_start')
     start  = datetime.strptime(week_start,'%Y-%m-%d')
     dates  = [(start+timedelta(days=i)).strftime('%Y-%m-%d') for i in range(6)]
-    r = sb.table('hq_shift_plans').select('*').in_('date',dates).execute()
+    r = sb.table('hq_shift_plans').select('*').eq('department_id',dept_id()).in_('date',dates).execute()
     return jsonify(r.data)
 
 @app.route('/api/shifts/week-bulk', methods=['POST'])
 def save_shifts_week_bulk():
     d     = request.json
+    did   = dept_id()
     start = datetime.strptime(d['week_start'],'%Y-%m-%d')
     dates = [(start+timedelta(days=i)).strftime('%Y-%m-%d') for i in range(6)]
-    sb.table('hq_shift_plans').delete().in_('date',dates).execute()
-    rows = [{'date':s['date'],'member_name':s['member_name'],'planned_hours':s['hours']}
+    sb.table('hq_shift_plans').delete().eq('department_id',did).in_('date',dates).execute()
+    rows = [{'date':s['date'],'member_name':s['member_name'],'planned_hours':s['hours'],'department_id':did}
             for s in d.get('shifts',[]) if s.get('hours',0)>0]
     if rows:
         sb.table('hq_shift_plans').insert(rows).execute()
@@ -487,78 +558,99 @@ def save_shifts_week_bulk():
 @app.route('/api/shifts/week-copy', methods=['POST'])
 def copy_shifts_week():
     d         = request.json
+    did       = dept_id()
     src       = datetime.strptime(d['src_start'],'%Y-%m-%d')
     dst       = datetime.strptime(d['dst_start'],'%Y-%m-%d')
     src_dates = [(src+timedelta(days=i)).strftime('%Y-%m-%d') for i in range(6)]
     dst_dates = [(dst+timedelta(days=i)).strftime('%Y-%m-%d') for i in range(6)]
-    rows      = sb.table('hq_shift_plans').select('*').in_('date',src_dates).execute().data
-    sb.table('hq_shift_plans').delete().in_('date',dst_dates).execute()
-    new_rows = [{'date':dst_dates[src_dates.index(r['date'])],'member_name':r['member_name'],'planned_hours':r['planned_hours']} for r in rows]
+    rows      = sb.table('hq_shift_plans').select('*').eq('department_id',did).in_('date',src_dates).execute().data
+    sb.table('hq_shift_plans').delete().eq('department_id',did).in_('date',dst_dates).execute()
+    new_rows = [{'date':dst_dates[src_dates.index(r['date'])],'member_name':r['member_name'],'planned_hours':r['planned_hours'],'department_id':did} for r in rows]
     if new_rows:
         sb.table('hq_shift_plans').insert(new_rows).execute()
     return jsonify({'ok': True, 'copied': len(rows)})
 
 # ─── 日報 ─────────────────────────────────────
-def calc_daily_report(target_date, expense_override=None):
+def calc_daily_report(target_date, did, cfg, expense_override=None):
+    # cfg（部署設定）で材料費率・固定費・特売チャネル名・各機能の有無を切り替える。
+    # 餅部・漬物部は features 空・sales_split 空のため、店別内訳/別注/NPO/DX合算は行われない。
+    cfg = cfg or {}
+    feats = cfg.get('features') or {}
+    split = cfg.get('sales_split') or {}
+    west_name     = split.get('west')
+    south_name    = split.get('south')
+    material_rate = cfg.get('material_rate', 0.5)
+    fixed_cost    = cfg.get('monthly_fixed_cost')
+
     # 非活性の出荷先は売上集計から除外（売上明細マトリクスと一致させるため）
-    active_chs   = sb.table('hq_channels').select('id,name').eq('active',1).execute().data
+    active_chs   = sb.table('hq_channels').select('id,name').eq('department_id',did).eq('active',1).execute().data
     active_cids  = {c['id'] for c in active_chs}
     channels     = {c['id']:c['name'] for c in active_chs}
-    actuals_all  = sb.table('hq_shipping_actuals').select('actual_amount,product_id,channel_id').eq('date',target_date).execute().data
+    actuals_all  = sb.table('hq_shipping_actuals').select('actual_amount,product_id,channel_id').eq('department_id',did).eq('date',target_date).execute().data
     actuals      = [r for r in actuals_all if r['channel_id'] in active_cids]
     total        = sum(r['actual_amount'] for r in actuals)
-    west         = sum(r['actual_amount'] for r in actuals if channels.get(r['channel_id'])=='西店')
-    south        = sum(r['actual_amount'] for r in actuals if channels.get(r['channel_id'])=='南店')
+    west  = sum(r['actual_amount'] for r in actuals if west_name  and channels.get(r['channel_id'])==west_name)
+    south = sum(r['actual_amount'] for r in actuals if south_name and channels.get(r['channel_id'])==south_name)
 
-    # dx 店頭注文を合算（store_id→channel で west/south/other に振り分け）
-    instore_rows = sb.table('hq_instore_orders').select('store_id,quantity,price').eq('date',target_date).execute().data
-    for r in instore_rows:
-        sid = r.get('store_id')
-        if sid not in active_cids: continue
-        amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
-        total += amt
-        cname = channels.get(sid)
-        if cname == '西店':   west  += amt
-        elif cname == '南店': south += amt
+    # dx 店頭注文／bento アプリ注文の合算は dx_orders 機能が有効な部署（弁当部）のみ
+    if feats.get('dx_orders'):
+        # dx 店頭注文を合算（store_id→channel で west/south/other に振り分け）
+        instore_rows = sb.table('hq_instore_orders').select('store_id,quantity,price').eq('department_id',did).eq('date',target_date).execute().data
+        for r in instore_rows:
+            sid = r.get('store_id')
+            if sid not in active_cids: continue
+            amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
+            total += amt
+            cname = channels.get(sid)
+            if   west_name  and cname == west_name:  west  += amt
+            elif south_name and cname == south_name: south += amt
 
-    # bento システム注文を合算（すべて 配達 チャネル → other 扱い）
-    try:
-        bento_orders = sb.table('orders').select('product_id,quantity')\
-            .eq('delivery_date',target_date).execute().data
-    except Exception:
-        bento_orders = []
-    if bento_orders:
-        bento_pids = list({o['product_id'] for o in bento_orders if o.get('product_id')})
+        # bento システム注文を合算（すべて 配達 チャネル → other 扱い）
         try:
-            bento_prods = sb.table('products').select('*').in_('id', bento_pids).execute().data
+            bento_orders = sb.table('orders').select('product_id,quantity')\
+                .eq('delivery_date',target_date).execute().data
         except Exception:
-            bento_prods = []
-        def _bp_price(p):
-            for k in ('price','unit_price'):
-                v = p.get(k)
-                if v is not None:
-                    try:    return int(round(float(v)))
-                    except: pass
-            return 0
-        bp_price = {p['id']: _bp_price(p) for p in bento_prods}
-        for o in bento_orders:
-            amt = int(round(float(o.get('quantity') or 0))) * bp_price.get(o.get('product_id'), 0)
-            total += amt  # 配達は西/南以外なので other に入る
+            bento_orders = []
+        if bento_orders:
+            bento_pids = list({o['product_id'] for o in bento_orders if o.get('product_id')})
+            try:
+                bento_prods = sb.table('products').select('*').in_('id', bento_pids).execute().data
+            except Exception:
+                bento_prods = []
+            def _bp_price(p):
+                for k in ('price','unit_price'):
+                    v = p.get(k)
+                    if v is not None:
+                        try:    return int(round(float(v)))
+                        except: pass
+                return 0
+            bp_price = {p['id']: _bp_price(p) for p in bento_prods}
+            for o in bento_orders:
+                amt = int(round(float(o.get('quantity') or 0))) * bp_price.get(o.get('product_id'), 0)
+                total += amt  # 配達は西/南以外なので other に入る
 
     other = total - west - south
 
-    betch_pids = {p['id'] for p in sb.table('hq_products').select('id').like('name','別注%').execute().data}
-    separate_orders = int(sum(r['actual_amount'] for r in actuals if r['product_id'] in betch_pids))
+    if feats.get('separate_orders'):
+        betch_pids = {p['id'] for p in sb.table('hq_products').select('id').eq('department_id',did).like('name','別注%').execute().data}
+        separate_orders = int(sum(r['actual_amount'] for r in actuals if r['product_id'] in betch_pids))
+    else:
+        separate_orders = 0
 
-    shifts_data = sb.table('hq_shifts').select('hours,member_name').eq('date',target_date).execute().data
+    shifts_data = sb.table('hq_shifts').select('hours,member_name').eq('department_id',did).eq('date',target_date).execute().data
     total_hours = sum(s['hours'] for s in shifts_data)
 
-    npo_pids = {p['id'] for p in sb.table('hq_products').select('id').like('name','NPO%').execute().data}
-    npo      = sum(r['actual_amount'] for r in actuals if r['product_id'] in npo_pids)
-    total_with_npo = total + int(npo * 0.08)
-    material = int(total_with_npo * 0.5)
-    expense  = expense_override if expense_override is not None else daily_expense(target_date)
+    if feats.get('npo_adjust'):
+        npo_pids = {p['id'] for p in sb.table('hq_products').select('id').eq('department_id',did).like('name','NPO%').execute().data}
+        npo      = sum(r['actual_amount'] for r in actuals if r['product_id'] in npo_pids)
+        total_with_npo = total + int(npo * 0.08)
+    else:
+        total_with_npo = total
 
+    material = int(total_with_npo * material_rate)
+    expense  = expense_override if expense_override is not None else daily_expense(target_date, fixed_cost)
+
+    # メンバー（時給）は全部署共通マスタ
     wage_map   = {m['name']:m['hourly_wage'] for m in sb.table('hq_members').select('name,hourly_wage').execute().data}
     labor_cost = sum(int(s['hours']*wage_map.get(s['member_name'],0)) for s in shifts_data)
     profit     = total_with_npo - material - labor_cost - expense
@@ -569,11 +661,11 @@ def calc_daily_report(target_date, expense_override=None):
             'total_hours':total_hours,'west_sales':west,'south_sales':south,'other_sales':other,
             'separate_orders':separate_orders}
 
-def build_snapshot(date_str):
+def build_snapshot(date_str, did):
     """date_str の actuals_detail / shifts / channels を現在のマスタで組み立てて返す"""
-    active_chs  = sb.table('hq_channels').select('*').eq('active',1).order('sort_order').execute().data
+    active_chs  = sb.table('hq_channels').select('*').eq('department_id',did).eq('active',1).order('sort_order').execute().data
     active_cids = {c['id'] for c in active_chs}
-    actuals = sb.table('hq_shipping_actuals').select('*').eq('date',date_str).gt('actual_qty',0).execute().data
+    actuals = sb.table('hq_shipping_actuals').select('*').eq('department_id',did).eq('date',date_str).gt('actual_qty',0).execute().data
     actuals = [a for a in actuals if a['channel_id'] in active_cids]
     if actuals:
         pids  = list({a['product_id'] for a in actuals})
@@ -588,19 +680,20 @@ def build_snapshot(date_str):
         detail.sort(key=lambda x:(x.get('category',''),x.get('product_id',0),x.get('sort_order',0)))
     else:
         detail = []
-    shifts = sb.table('hq_shifts').select('*').eq('date',date_str).order('member_name').execute().data
+    shifts = sb.table('hq_shifts').select('*').eq('department_id',did).eq('date',date_str).order('member_name').execute().data
     return {'actuals_detail':detail,'shifts':shifts,'channels':active_chs}
 
-def finalize_report(date_str):
+def finalize_report(date_str, did, cfg):
     """date_str の日報を確定する。既に確定済みなら False。"""
-    stored = sb.table('hq_daily_reports').select('expense,weather,note,finalized_at').eq('date',date_str).execute().data
+    stored = sb.table('hq_daily_reports').select('expense,weather,note,finalized_at').eq('department_id',did).eq('date',date_str).execute().data
     if stored and stored[0].get('finalized_at'):
         return False
     expense_override = stored[0].get('expense') if stored else None
-    calc = calc_daily_report(date_str, expense_override=expense_override)
-    snap = build_snapshot(date_str)
+    calc = calc_daily_report(date_str, did, cfg, expense_override=expense_override)
+    snap = build_snapshot(date_str, did)
     data = {
         'date': date_str,
+        'department_id': did,
         'weather': stored[0].get('weather','') if stored else '',
         'note':    stored[0].get('note','')    if stored else '',
         **{k: calc[k] for k in ('total_sales','material_cost','labor_cost','expense','profit',
@@ -611,12 +704,13 @@ def finalize_report(date_str):
         'channels_snapshot': snap['channels'],
         'finalized_at':      finalize_ts(date_str),
     }
-    sb.table('hq_daily_reports').upsert(data, on_conflict='date').execute()
+    sb.table('hq_daily_reports').upsert(data, on_conflict='department_id,date').execute()
     return True
 
 @app.route('/api/daily-reports/<date_str>', methods=['GET'])
 def get_daily_report(date_str):
-    stored_rows = sb.table('hq_daily_reports').select('*').eq('date',date_str).execute().data
+    dep = get_dept(); did = dep['id']; cfg = dep.get('config') or {}
+    stored_rows = sb.table('hq_daily_reports').select('*').eq('department_id',did).eq('date',date_str).execute().data
     stored = stored_rows[0] if stored_rows else None
 
     # 確定済み → snapshot をそのまま返す（再計算しない）
@@ -630,21 +724,21 @@ def get_daily_report(date_str):
     # 過去日かつ未確定 → 即時確定（遅延確定）してから再読込
     # ただし以前確定→明示解除された日（snapshot 残存）は再確定しない（編集中扱い）
     if date_str < today_jst().isoformat() and not (stored and stored.get('actuals_snapshot')):
-        finalize_report(date_str)
+        finalize_report(date_str, did, cfg)
         return get_daily_report(date_str)
 
     # 当日以降 → 従来通り再計算
-    calc = calc_daily_report(date_str, expense_override=stored.get('expense') if stored else None)
+    calc = calc_daily_report(date_str, did, cfg, expense_override=stored.get('expense') if stored else None)
     if stored:
         result = {**stored, **calc}
         sync_keys = ['total_sales','material_cost','labor_cost','profit','labor_productivity',
                      'total_hours','west_sales','south_sales','other_sales','separate_orders']
         if any(stored.get(k) != calc.get(k) for k in sync_keys):
-            sb.table('hq_daily_reports').update({k:calc[k] for k in sync_keys}).eq('date',date_str).execute()
+            sb.table('hq_daily_reports').update({k:calc[k] for k in sync_keys}).eq('department_id',did).eq('date',date_str).execute()
     else:
         result = calc
 
-    snap = build_snapshot(date_str)
+    snap = build_snapshot(date_str, did)
     result['actuals_detail'] = snap['actuals_detail']
     result['channels']       = snap['channels']
     result['shifts']         = snap['shifts']
@@ -652,7 +746,8 @@ def get_daily_report(date_str):
 
 @app.route('/api/daily-reports/<date_str>/finalize', methods=['POST'])
 def finalize_daily_report(date_str):
-    if finalize_report(date_str):
+    dep = get_dept()
+    if finalize_report(date_str, dep['id'], dep.get('config') or {}):
         return jsonify({'ok': True, 'finalized_at': now_jst_iso()})
     return jsonify({'ok': False, 'error': 'already finalized'}), 409
 
@@ -660,12 +755,13 @@ def finalize_daily_report(date_str):
 def unfinalize_daily_report(date_str):
     """確定済み日報のロックを解除して再編集可能にする。
     finalized_at を NULL に戻すが、snapshot 列は履歴として残す。"""
-    stored = sb.table('hq_daily_reports').select('finalized_at').eq('date',date_str).execute().data
+    did = dept_id()
+    stored = sb.table('hq_daily_reports').select('finalized_at').eq('department_id',did).eq('date',date_str).execute().data
     if not stored:
         return jsonify({'ok': False, 'error': 'not found'}), 404
     if not stored[0].get('finalized_at'):
         return jsonify({'ok': False, 'error': 'not finalized'}), 409
-    sb.table('hq_daily_reports').update({'finalized_at': None}).eq('date',date_str).execute()
+    sb.table('hq_daily_reports').update({'finalized_at': None}).eq('department_id',did).eq('date',date_str).execute()
     return jsonify({'ok': True})
 
 @app.route('/api/admin/finalize-pending', methods=['POST'])
@@ -675,11 +771,17 @@ def finalize_pending():
     if secret and request.headers.get('X-Cron-Secret') != secret:
         return jsonify({'error':'unauthorized'}), 401
     cutoff = today_jst().isoformat()
-    rows = sb.table('hq_daily_reports').select('date').lt('date',cutoff).is_('finalized_at','null').execute().data
+    # 全部署について過去日の未確定日報を確定する
+    depts = sb.table('hq_departments').select('*').eq('active',1).execute().data or []
+    if not depts:
+        depts = [{'id':1,'code':'bento','config':{}}]
     finalized = []
-    for r in rows:
-        if finalize_report(r['date']):
-            finalized.append(r['date'])
+    for dp in depts:
+        did = dp['id']; cfg = dp.get('config') or {}
+        rows = sb.table('hq_daily_reports').select('date').eq('department_id',did).lt('date',cutoff).is_('finalized_at','null').execute().data
+        for r in rows:
+            if finalize_report(r['date'], did, cfg):
+                finalized.append({'dept': dp.get('code'), 'date': r['date']})
     return jsonify({'ok': True, 'finalized': finalized, 'count': len(finalized)})
 
 @app.route('/api/admin/fix-finalized-timestamps', methods=['POST'])
@@ -691,7 +793,7 @@ def fix_finalized_timestamps():
     if secret and request.headers.get('X-Cron-Secret') != secret:
         return jsonify({'error':'unauthorized'}), 401
     cutoff = today_jst().isoformat()
-    rows = sb.table('hq_daily_reports').select('date,finalized_at').lt('date',cutoff).execute().data
+    rows = sb.table('hq_daily_reports').select('date,finalized_at,department_id').lt('date',cutoff).execute().data
     fixed = []
     for r in rows:
         cur = r.get('finalized_at')
@@ -700,53 +802,59 @@ def fix_finalized_timestamps():
         want = f"{r['date']}T23:59:59+09:00"
         if str(cur).startswith(f"{r['date']}T23:59:59"):
             continue  # 既に営業日終了時刻になっている
-        sb.table('hq_daily_reports').update({'finalized_at': want}).eq('date', r['date']).execute()
+        q = sb.table('hq_daily_reports').update({'finalized_at': want}).eq('date', r['date'])
+        if r.get('department_id') is not None:
+            q = q.eq('department_id', r['department_id'])
+        q.execute()
         fixed.append(r['date'])
     return jsonify({'ok': True, 'fixed': len(fixed)})
 
 @app.route('/api/daily-info/<date_str>', methods=['POST'])
 def save_daily_info(date_str):
     d = request.json
-    existing = sb.table('hq_daily_reports').select('date,finalized_at').eq('date',date_str).execute().data
+    did = dept_id()
+    existing = sb.table('hq_daily_reports').select('date,finalized_at').eq('department_id',did).eq('date',date_str).execute().data
     if existing:
         # 確定済みは weather / note のみ更新可
         if existing[0].get('finalized_at'):
-            sb.table('hq_daily_reports').update({'weather':d.get('weather',''),'note':d.get('note','')}).eq('date',date_str).execute()
+            sb.table('hq_daily_reports').update({'weather':d.get('weather',''),'note':d.get('note','')}).eq('department_id',did).eq('date',date_str).execute()
         else:
-            sb.table('hq_daily_reports').update({'weather':d.get('weather',''),'note':d.get('note',''),'separate_orders':d.get('separate_orders',0)}).eq('date',date_str).execute()
+            sb.table('hq_daily_reports').update({'weather':d.get('weather',''),'note':d.get('note',''),'separate_orders':d.get('separate_orders',0)}).eq('department_id',did).eq('date',date_str).execute()
     else:
-        sb.table('hq_daily_reports').insert({'date':date_str,'weather':d.get('weather',''),'note':d.get('note',''),'separate_orders':d.get('separate_orders',0),'total_sales':0,'material_cost':0,'labor_cost':0,'expense':0,'profit':0,'labor_productivity':0,'total_hours':0,'west_sales':0,'south_sales':0,'other_sales':0}).execute()
+        sb.table('hq_daily_reports').insert({'date':date_str,'department_id':did,'weather':d.get('weather',''),'note':d.get('note',''),'separate_orders':d.get('separate_orders',0),'total_sales':0,'material_cost':0,'labor_cost':0,'expense':0,'profit':0,'labor_productivity':0,'total_hours':0,'west_sales':0,'south_sales':0,'other_sales':0}).execute()
     return jsonify({'ok': True})
 
 @app.route('/api/daily-reports/<date_str>', methods=['POST'])
 def save_daily_report(date_str):
     d = request.json
-    existing = sb.table('hq_daily_reports').select('finalized_at').eq('date',date_str).execute().data
+    did = dept_id()
+    existing = sb.table('hq_daily_reports').select('finalized_at').eq('department_id',did).eq('date',date_str).execute().data
     # 確定済みは weather / note のみ更新可
     if existing and existing[0].get('finalized_at'):
-        sb.table('hq_daily_reports').update({'weather':d.get('weather',''),'note':d.get('note','')}).eq('date',date_str).execute()
+        sb.table('hq_daily_reports').update({'weather':d.get('weather',''),'note':d.get('note','')}).eq('department_id',did).eq('date',date_str).execute()
         return jsonify({'ok': True, 'locked': True})
-    data = {'date':date_str,'weather':d.get('weather'),'total_sales':d.get('total_sales',0),'separate_orders':d.get('separate_orders',0),
+    data = {'date':date_str,'department_id':did,'weather':d.get('weather'),'total_sales':d.get('total_sales',0),'separate_orders':d.get('separate_orders',0),
             'material_cost':d.get('material_cost',0),'labor_cost':d.get('labor_cost',0),'expense':d.get('expense',0),
             'profit':d.get('profit',0),'labor_productivity':d.get('labor_productivity',0),'total_hours':d.get('total_hours',0),
             'west_sales':d.get('west_sales',0),'south_sales':d.get('south_sales',0),'other_sales':d.get('other_sales',0),'note':d.get('note','')}
-    sb.table('hq_daily_reports').upsert(data, on_conflict='date').execute()
+    sb.table('hq_daily_reports').upsert(data, on_conflict='department_id,date').execute()
     return jsonify({'ok': True})
 
 @app.route('/api/daily-reports/<date_str>/generate', methods=['POST'])
 def generate_daily_report(date_str):
-    existing = sb.table('hq_daily_reports').select('note,finalized_at').eq('date',date_str).execute().data
+    dep = get_dept(); did = dep['id']; cfg = dep.get('config') or {}
+    existing = sb.table('hq_daily_reports').select('note,finalized_at').eq('department_id',did).eq('date',date_str).execute().data
     if existing and existing[0].get('finalized_at'):
         return jsonify({'ok': False, 'error': 'finalized'}), 409
-    calc    = calc_daily_report(date_str)
+    calc    = calc_daily_report(date_str, did, cfg)
     weather = request.json.get('weather','') if request.json else ''
     note    = request.json.get('note','')    if request.json else ''
     saved_note = existing[0]['note'] if existing else note
-    data = {'date':date_str,'weather':weather,'total_sales':calc['total_sales'],'separate_orders':calc['separate_orders'],
+    data = {'date':date_str,'department_id':did,'weather':weather,'total_sales':calc['total_sales'],'separate_orders':calc['separate_orders'],
             'material_cost':calc['material_cost'],'labor_cost':calc['labor_cost'],'expense':calc['expense'],
             'profit':calc['profit'],'labor_productivity':calc['labor_productivity'],'total_hours':calc['total_hours'],
             'west_sales':calc['west_sales'],'south_sales':calc['south_sales'],'other_sales':calc['other_sales'],'note':saved_note}
-    sb.table('hq_daily_reports').upsert(data, on_conflict='date').execute()
+    sb.table('hq_daily_reports').upsert(data, on_conflict='department_id,date').execute()
     return jsonify({'ok': True, **calc})
 
 # ─── 売上実績の一括取込（過去データ・日次CSV由来） ──
@@ -762,6 +870,7 @@ def import_sales_actuals():
     payload   = request.json or {}
     rows      = payload.get('rows') or []
     overwrite = bool(payload.get('overwrite'))
+    did       = dept_id()
     if not rows:
         return jsonify({'ok': False, 'error': 'no rows'}), 400
 
@@ -770,7 +879,7 @@ def import_sales_actuals():
     existing_finalized = set()
     for j in range(0, len(dates), 300):
         chunk = dates[j:j+300]
-        ex = sb.table('hq_daily_reports').select('date,finalized_at').in_('date', chunk).execute().data
+        ex = sb.table('hq_daily_reports').select('date,finalized_at').eq('department_id',did).in_('date', chunk).execute().data
         existing_finalized |= {e['date'] for e in ex if e.get('finalized_at')}
 
     def num(v):
@@ -814,7 +923,7 @@ def import_sales_actuals():
             else (total_sales - material_cost - labor_cost - expense)
         labor_prod = round(total_sales / total_hours, 0) if total_hours > 0 else 0
         upserts.append({
-            'date': d, 'weather': str(r.get('weather', '') or ''),
+            'date': d, 'department_id': did, 'weather': str(r.get('weather', '') or ''),
             'total_sales': total_sales, 'west_sales': west_sales,
             'south_sales': south_sales, 'other_sales': other_sales,
             'labor_cost': labor_cost, 'total_hours': total_hours,
@@ -826,7 +935,7 @@ def import_sales_actuals():
         imported.append(d)
 
     for j in range(0, len(upserts), 500):
-        sb.table('hq_daily_reports').upsert(upserts[j:j+500], on_conflict='date').execute()
+        sb.table('hq_daily_reports').upsert(upserts[j:j+500], on_conflict='department_id,date').execute()
 
     return jsonify({'ok': True, 'imported': len(imported), 'imported_dates': imported,
                     'skipped': skipped, 'errors': errors, 'overwrite': overwrite})
@@ -845,20 +954,22 @@ def _year_range(year):
 @app.route('/api/monthly-summary', methods=['GET'])
 def monthly_summary():
     ym   = request.args.get('month')
-    rows = sb.table('hq_daily_reports').select('*').like('date',ym+'%').order('date').execute().data
-    # 注文売上を期間集計。dx 店頭注文と bento アプリ注文は別キーで保持（列分離のため）
-    instore_rows = sb.table('hq_instore_orders').select('date,quantity,price').like('date',ym+'%').execute().data
+    dep = get_dept(); did = dep['id']; feats = (dep.get('config') or {}).get('features') or {}
+    rows = sb.table('hq_daily_reports').select('*').eq('department_id',did).like('date',ym+'%').order('date').execute().data
+    # 注文売上を期間集計。dx 店頭注文と bento アプリ注文は dx_orders 機能のある部署のみ
     instore_by_date = {}
-    for r in instore_rows:
-        amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
-        instore_by_date[r['date']] = instore_by_date.get(r['date'],0) + amt
+    bento_by_date = {}
+    if feats.get('dx_orders'):
+        instore_rows = sb.table('hq_instore_orders').select('date,quantity,price').eq('department_id',did).like('date',ym+'%').execute().data
+        for r in instore_rows:
+            amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
+            instore_by_date[r['date']] = instore_by_date.get(r['date'],0) + amt
     # bento システムの orders を月内範囲で取得（product_id 経由で price を引く）
     # delivery_date は DATE 型のため like ではなく gte/lt で範囲指定する
-    bento_by_date = {}
     start, end = _month_range(ym)
     try:
         bento_orders = sb.table('orders').select('delivery_date,product_id,quantity')\
-            .gte('delivery_date',start).lt('delivery_date',end).execute().data
+            .gte('delivery_date',start).lt('delivery_date',end).execute().data if feats.get('dx_orders') else []
     except Exception:
         bento_orders = []
     if bento_orders:
@@ -909,21 +1020,23 @@ def monthly_summary():
 @app.route('/api/yearly-summary', methods=['GET'])
 def yearly_summary():
     year = request.args.get('year')
-    rows = sb.table('hq_daily_reports').select('*').like('date',year+'%').order('date').execute().data
+    dep = get_dept(); did = dep['id']; feats = (dep.get('config') or {}).get('features') or {}
+    rows = sb.table('hq_daily_reports').select('*').eq('department_id',did).like('date',year+'%').order('date').execute().data
     # 注文売上を日別集計（月別ではなく）。日報がある日付の分だけ後で月集計に組み入れる
-    instore_rows = sb.table('hq_instore_orders').select('date,quantity,price').like('date',year+'%').execute().data
     instore_by_date = {}
-    for r in instore_rows:
-        d = r.get('date')
-        if not d: continue
-        amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
-        instore_by_date[d] = instore_by_date.get(d,0) + amt
-    # delivery_date は DATE 型のため like ではなく gte/lt で範囲指定する
     bento_by_date = {}
+    if feats.get('dx_orders'):
+        instore_rows = sb.table('hq_instore_orders').select('date,quantity,price').eq('department_id',did).like('date',year+'%').execute().data
+        for r in instore_rows:
+            d = r.get('date')
+            if not d: continue
+            amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
+            instore_by_date[d] = instore_by_date.get(d,0) + amt
+    # delivery_date は DATE 型のため like ではなく gte/lt で範囲指定する
     start, end = _year_range(year)
     try:
         bento_orders = sb.table('orders').select('delivery_date,product_id,quantity')\
-            .gte('delivery_date',start).lt('delivery_date',end).execute().data
+            .gte('delivery_date',start).lt('delivery_date',end).execute().data if feats.get('dx_orders') else []
     except Exception:
         bento_orders = []
     if bento_orders:
@@ -993,14 +1106,15 @@ def yearly_summary():
 @app.route('/api/print/shipping-plan', methods=['GET'])
 def print_shipping_plan():
     target_date = request.args.get('date')
-    channels = sb.table('hq_channels').select('*').eq('active',1).order('sort_order').execute().data
-    products = sb.table('hq_products').select('*').eq('active',1).order('category').order('id').execute().data
-    plans    = sb.table('hq_shipping_plans').select('product_id,channel_id,planned_qty,note').eq('date',target_date).execute().data
+    did = dept_id()
+    channels = sb.table('hq_channels').select('*').eq('department_id',did).eq('active',1).order('sort_order').execute().data
+    products = sb.table('hq_products').select('*').eq('department_id',did).eq('active',1).order('category').order('id').execute().data
+    plans    = sb.table('hq_shipping_plans').select('product_id,channel_id,planned_qty,note').eq('department_id',did).eq('date',target_date).execute().data
     plan_map = {(p['product_id'],p['channel_id']):p['planned_qty'] for p in plans}
     note_map = {p['product_id']:p['note'] for p in plans if p.get('note')}
     dt     = datetime.strptime(target_date,'%Y-%m-%d')
     monday = (dt-timedelta(days=dt.weekday())).strftime('%Y-%m-%d')
-    menus  = sb.table('hq_weekly_menus').select('*').eq('week_start',monday).eq('day_of_week',dt.weekday()+1).order('category').execute().data
+    menus  = sb.table('hq_weekly_menus').select('*').eq('department_id',did).eq('week_start',monday).eq('day_of_week',dt.weekday()+1).order('category').execute().data
     result = {'date':target_date,'channels':channels,'products':[],'menus':menus}
     for p in products:
         row = {'id':p['id'],'name':p['name'],'price':p['price'],'category':p['category'],'note':note_map.get(p['id'],''),'quantities':{}}
@@ -1100,6 +1214,7 @@ def get_instore_orders():
     """dx.InstoreOrder + dx.OrderProduct から取得し hq_instore_orders に mirror して返す。
     過去日は dx を叩かず hq の保存値だけ返す（履歴凍結）。"""
     target_date = request.args.get('date')
+    did = dept_id()
     if not target_date:
         return jsonify({'error':'date required'}), 400
 
@@ -1111,7 +1226,7 @@ def get_instore_orders():
 
     # 過去日 → hq のキャッシュだけ返す
     if target_date < today_jst().isoformat():
-        rows = sb.table('hq_instore_orders').select('*').eq('date',target_date).order('id').execute().data
+        rows = sb.table('hq_instore_orders').select('*').eq('department_id',did).eq('date',target_date).order('id').execute().data
         return jsonify(_normalize(rows))
 
     # 当日以降 → dx から取得して mirror（sb_dx は dx 専用クライアント）
@@ -1122,7 +1237,7 @@ def get_instore_orders():
             .eq(DX_DATE_COL, target_date).eq('status','active').execute().data
     except Exception as e:
         # dx 接続失敗時は hq のキャッシュにフォールバック
-        rows = sb.table('hq_instore_orders').select('*').eq('date',target_date).order('id').execute().data
+        rows = sb.table('hq_instore_orders').select('*').eq('department_id',did).eq('date',target_date).order('id').execute().data
         return jsonify(_normalize(rows))
 
     if not dx_orders:
@@ -1152,6 +1267,7 @@ def get_instore_orders():
         unit_price = p.get('price') or o.get('price') or 0
         mirror_rows.append({
             'date':          target_date,
+            'department_id': did,
             'store_id':      o['storeId'],
             'product_name':  o['productName'],
             'customer_name': o.get('customerName') or '',
@@ -1161,7 +1277,7 @@ def get_instore_orders():
             'source_id':     source_id,
         })
     # 既存キャッシュのうち、今回の active セットに無いもの（＝dx 側で cancelled/削除済）を除去
-    existing = sb.table('hq_instore_orders').select('source_id').eq('date',target_date).execute().data
+    existing = sb.table('hq_instore_orders').select('source_id').eq('department_id',did).eq('date',target_date).execute().data
     active_ids = {r['source_id'] for r in mirror_rows}
     stale_ids  = [r['source_id'] for r in existing if r.get('source_id') not in active_ids]
     if stale_ids:
@@ -1170,7 +1286,7 @@ def get_instore_orders():
     if mirror_rows:
         sb.table('hq_instore_orders').upsert(mirror_rows, on_conflict='source_id').execute()
 
-    rows = sb.table('hq_instore_orders').select('*').eq('date',target_date).order('id').execute().data
+    rows = sb.table('hq_instore_orders').select('*').eq('department_id',did).eq('date',target_date).order('id').execute().data
     return jsonify(_normalize(rows))
 
 if __name__ == '__main__':
