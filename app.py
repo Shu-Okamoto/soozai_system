@@ -121,6 +121,12 @@ def daily_expense(target_date_str, monthly_fixed_cost=None):
 def index():
     return send_file(os.path.join(os.path.dirname(__file__), 'index.html'))
 
+# 部署別の入口（/mochi, /tsukemono 等）。同じSPAを返し、フロントが URL から部署を判定する。
+# /api/... は2セグメント以上なのでこの単一セグメントのルートには一致しない。
+@app.route('/<dept_code>')
+def index_dept(dept_code):
+    return send_file(os.path.join(os.path.dirname(__file__), 'index.html'))
+
 # ─── 部署マスタ（フロントの部署セレクタ・機能フラグ用）──
 @app.route('/api/departments', methods=['GET'])
 def get_departments():
