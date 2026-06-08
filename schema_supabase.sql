@@ -181,10 +181,13 @@ INSERT INTO hq_departments (id, code, name, sort_order, config) VALUES
  (1,'bento','弁当惣菜部',1,
    '{"monthly_fixed_cost":300000,"material_rate":0.5,"sales_split":{"west":"西店","south":"南店"},"features":{"weekly_menu":true,"order_calc":true,"dx_orders":true,"npo_adjust":true,"separate_orders":true}}'::jsonb),
  (2,'mochi','餅部',2,
-   '{"monthly_fixed_cost":100000,"material_rate":0.45,"sales_split":{},"features":{}}'::jsonb),
+   '{"monthly_fixed_cost":70000,"material_rate":0.5,"sales_split":{},"features":{}}'::jsonb),
  (3,'tsukemono','漬物部',3,
-   '{"monthly_fixed_cost":100000,"material_rate":0.45,"sales_split":{},"features":{}}'::jsonb)
+   '{"monthly_fixed_cost":70000,"material_rate":0.5,"sales_split":{},"features":{}}'::jsonb)
 ON CONFLICT (id) DO NOTHING;
+-- 部署別の管理者PINは config.admin_pin に設定する（任意・サーバー側で検証）。例:
+--   UPDATE hq_departments SET config = config || '{"admin_pin":"0000"}'::jsonb WHERE code='mochi';
+-- 本部（全部署切替可）の管理者PINは環境変数 HQ_ADMIN_PIN（既定 1234）。
 -- 明示id挿入後はシーケンスを進めておく（以降の自動採番が衝突しないように）
 SELECT setval(pg_get_serial_sequence('hq_departments','id'),
               GREATEST((SELECT COALESCE(MAX(id),1) FROM hq_departments), 1));

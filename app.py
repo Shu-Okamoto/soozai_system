@@ -126,7 +126,34 @@ def index():
 def get_departments():
     rows = sb.table('hq_departments').select('id,code,name,sort_order,active,config')\
         .eq('active',1).order('sort_order').execute().data
+    # admin_pin はクライアントへ返さない（PIN検証はサーバー側 /api/auth/verify-pin で行う）
+    for r in rows:
+        cfg = r.get('config')
+        if isinstance(cfg, dict) and 'admin_pin' in cfg:
+            r['config'] = {k: v for k, v in cfg.items() if k != 'admin_pin'}
     return jsonify(rows)
+
+# ─── 管理者PIN検証 ─────────────────────────────
+# 本部PIN（環境変数 HQ_ADMIN_PIN、既定 1234）＝全部署切替可。
+# 部署別PIN（hq_departments.config.admin_pin）＝その部署のみ。
+HQ_ADMIN_PIN = os.environ.get('HQ_ADMIN_PIN', '1234')
+
+@app.route('/api/auth/verify-pin', methods=['POST'])
+def verify_pin():
+    d = request.json or {}
+    pin  = str(d.get('pin', '')).strip()
+    code = d.get('dept')
+    if not pin:
+        return jsonify({'ok': False})
+    # 本部管理者（全部署切替可）
+    if pin == HQ_ADMIN_PIN:
+        return jsonify({'ok': True, 'role': 'admin', 'scope': 'hq'})
+    # 部署別管理者（自部署のみ）
+    dep = get_dept(code)
+    dep_pin = str((dep.get('config') or {}).get('admin_pin') or '').strip()
+    if dep_pin and pin == dep_pin:
+        return jsonify({'ok': True, 'role': 'admin', 'scope': 'dept', 'dept': dep.get('code')})
+    return jsonify({'ok': False})
 
 # ─── 商品マスタ ───────────────────────────────
 @app.route('/api/products', methods=['GET'])
