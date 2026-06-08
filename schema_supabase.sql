@@ -166,3 +166,51 @@ FROM public.hq_daily_reports;
 -- PostgREST/各ロールから読めるように SELECT 権限を付与
 GRANT USAGE ON SCHEMA dx TO anon, authenticated, service_role;
 GRANT SELECT ON dx.sales_history TO anon, authenticated, service_role;
+
+-- ════════════════════════════════════════════════════════════
+-- 部署(department) 基盤  [Phase 1]
+-- 弁当惣菜部のみで使われている本システムを、餅部・漬物部にも拡張するための土台。
+-- ・全 hq_* テーブル（メンバーを除く）を「部署」で分離できるよう department_id を追加
+-- ・既存データはすべて『弁当惣菜部(id=1)』に紐付け、新規行も既定で弁当部になる
+--   → この Phase 1 を適用しても、アプリの挙動は一切変わらない（後方互換）
+-- ・ユニーク/主キーへの department_id 取り込みは Phase 2（アプリのdept対応）で実施する
+--   （現行コードは on_conflict='date' 等を使うため、ここでは制約を変更しない）
+-- 本ファイルは再実行安全（idempotent）。
+-- ════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS hq_departments (
+    id         BIGSERIAL PRIMARY KEY,
+    code       TEXT UNIQUE NOT NULL,          -- 'bento' | 'mochi' | 'tsukemono'
+    name       TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    active     INTEGER DEFAULT 1,
+    config     JSONB DEFAULT '{}'::jsonb      -- 部署ごとの設定（固定費・材料費率・機能フラグ等）
+);
+-- 弁当部は現行のハードコード値を厳密に再現。餅部・漬物部の数値は暫定（立上げ時に調整）。
+INSERT INTO hq_departments (id, code, name, sort_order, config) VALUES
+ (1,'bento','弁当惣菜部',1,
+   '{"monthly_fixed_cost":300000,"material_rate":0.5,"sales_split":{"west":"西店","south":"南店"},"features":{"weekly_menu":true,"order_calc":true,"dx_orders":true,"npo_adjust":true,"separate_orders":true}}'::jsonb),
+ (2,'mochi','餅部',2,
+   '{"monthly_fixed_cost":100000,"material_rate":0.45,"sales_split":{},"features":{}}'::jsonb),
+ (3,'tsukemono','漬物部',3,
+   '{"monthly_fixed_cost":100000,"material_rate":0.45,"sales_split":{},"features":{}}'::jsonb)
+ON CONFLICT (id) DO NOTHING;
+-- 明示id挿入後はシーケンスを進めておく（以降の自動採番が衝突しないように）
+SELECT setval(pg_get_serial_sequence('hq_departments','id'),
+              GREATEST((SELECT COALESCE(MAX(id),1) FROM hq_departments), 1));
+
+-- 各テーブルに department_id を追加 → 既存行を弁当部(1)に backfill → 既定値を1に。
+-- （hq_members は全部署で共有するため department_id を持たせない）
+DO $$
+DECLARE t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'hq_products','hq_channels','hq_categories','hq_subcategories','hq_weekly_menus',
+    'hq_shipping_plans','hq_shipping_actuals','hq_shifts','hq_shift_plans',
+    'hq_daily_reports','hq_instore_orders','hq_checklist_records'
+  ] LOOP
+    EXECUTE format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS department_id BIGINT REFERENCES hq_departments(id);', t);
+    EXECUTE format('UPDATE %I SET department_id = 1 WHERE department_id IS NULL;', t);
+    EXECUTE format('ALTER TABLE %I ALTER COLUMN department_id SET DEFAULT 1;', t);
+    EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON %I (department_id);', t||'_dept_idx', t);
+  END LOOP;
+END $$;
