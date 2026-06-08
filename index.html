@@ -137,8 +137,6 @@
     <div class="sidebar-logo">
       <h1>惣菜本部 業務システム</h1>
       <p id="dept-label">みかわ 弁当・惣菜部</p>
-      <select id="dept-switcher" onchange="switchDept(this.value)"
-        style="display:none;margin-top:8px;width:100%;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:#fff;border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit;cursor:pointer"></select>
     </div>
     <div class="nav-group">
       <div class="nav-label">日次業務</div>
@@ -194,14 +192,8 @@
 <div class="toast" id="toast"></div>
 
 <div id="role-overlay" style="position:fixed;inset:0;z-index:9999;background:#1A1A18;display:flex;align-items:center;justify-content:center">
-  <!-- 部署選択 -->
-  <div id="dept-select-view" style="display:none;text-align:center;color:#fff;padding:40px">
-    <div style="font-size:13px;color:rgba(255,255,255,.4);margin-bottom:8px">みかわ 惣菜本部</div>
-    <h2 style="font-size:24px;font-weight:700;margin-bottom:40px">部署を選択してください</h2>
-    <div id="dept-select-buttons" style="display:flex;gap:20px;justify-content:center;flex-wrap:wrap"></div>
-  </div>
   <!-- ロール選択 -->
-  <div id="role-select-view" style="display:none;text-align:center;color:#fff;padding:40px">
+  <div id="role-select-view" style="text-align:center;color:#fff;padding:40px">
     <div style="font-size:13px;color:rgba(255,255,255,.4);margin-bottom:8px">みかわ 弁当・惣菜部</div>
     <h2 style="font-size:24px;font-weight:700;margin-bottom:40px">惣菜本部 業務システム</h2>
     <div style="display:flex;gap:20px;justify-content:center">
@@ -244,10 +236,11 @@ const API = window.location.hostname === 'localhost' || window.location.hostname
   : '/api';
 // PINはサーバー側で検証する（本部=環境変数 HQ_ADMIN_PIN、部署別=hq_departments.config.admin_pin）
 let currentRole = sessionStorage.getItem('sozai_role') || null;
-let adminScope  = sessionStorage.getItem('sozai_admin_scope') || null; // 'hq' | 'dept'
 
 // ─── 部署(department) ───────────────────────────
-let currentDept       = sessionStorage.getItem('sozai_dept') || null;
+// 部署は URL で決まる： / = 弁当部, /mochi = 餅部, /tsukemono = 漬物部。
+// アプリ内での部署切替は行わない（入口＝URLで分離）。弁当部は従来どおりの挙動。
+let currentDept = (location.pathname.replace(/^\/+/, '').split('/')[0].toLowerCase() || 'bento');
 let cachedDepartments = [];
 let currentDeptObj    = null;
 
@@ -270,7 +263,12 @@ async function loadDepartments() {
     cachedDepartments = [{code:'bento', name:'弁当惣菜部',
       config:{features:{weekly_menu:true, order_calc:true, dx_orders:true}}}];
   }
-  if (currentDept) currentDeptObj = cachedDepartments.find(d => d.code === currentDept) || null;
+  currentDeptObj = cachedDepartments.find(d => d.code === currentDept) || null;
+  // URL が未知の部署コードなら弁当部にフォールバック
+  if (!currentDeptObj) {
+    currentDept = 'bento';
+    currentDeptObj = cachedDepartments.find(d => d.code === 'bento') || null;
+  }
 }
 
 function deptFeatures() {
@@ -285,63 +283,14 @@ function applyDeptFeatures() {
     const el = document.getElementById('nav-' + page);
     if (el) el.style.display = feats[feat] ? '' : 'none';
   }
+  // 弁当部以外はサイドバーに部署名を表示（弁当部は従来表記のまま）
   const lbl = document.getElementById('dept-label');
-  if (lbl && currentDeptObj) lbl.textContent = 'みかわ ' + currentDeptObj.name;
-  renderDeptSwitcher();
+  if (lbl && currentDeptObj && currentDept !== 'bento') lbl.textContent = 'みかわ ' + currentDeptObj.name;
 }
 
-// 部署スイッチャー：本部（管理者ロール）かつ複数部署があるときのみ表示
-function renderDeptSwitcher() {
-  const sel = document.getElementById('dept-switcher');
-  if (!sel) return;
-  // 全部署切替は本部管理者（adminScope==='hq'）のみ。部署別管理者は自部署に固定。
-  const canSwitch = currentRole === 'admin' && adminScope === 'hq' && cachedDepartments.length > 1;
-  if (!canSwitch) { sel.style.display = 'none'; return; }
-  sel.innerHTML = cachedDepartments.map(d =>
-    `<option value="${d.code}" ${d.code===currentDept?'selected':''}>🏢 ${d.name}</option>`).join('');
-  sel.style.display = '';
-}
-
-async function switchDept(code) {
-  if (code === currentDept) return;
-  currentDept = code;
-  sessionStorage.setItem('sozai_dept', code);
-  currentDeptObj = cachedDepartments.find(d => d.code === code) || null;
-  applyDeptFeatures();
-  cachedProducts = [];
-  await initData();   // 部署のマスタを読み直して再描画
-}
-
-// 起動時：部署選択画面
-function showDeptSelection() {
-  const wrap = document.getElementById('dept-select-buttons');
-  wrap.innerHTML = cachedDepartments.map(d =>
-    `<button onclick="selectDept('${d.code}')"
-       style="background:#3B6E3F;color:#fff;border:none;border-radius:12px;padding:24px 36px;font-size:20px;font-weight:700;cursor:pointer;font-family:inherit;min-width:150px">
-       🏢 ${d.name}</button>`).join('');
-  document.getElementById('dept-select-view').style.display = '';
-  document.getElementById('role-select-view').style.display = 'none';
-  document.getElementById('pin-input-view').style.display = 'none';
-  document.getElementById('role-overlay').style.display = 'flex';
-}
-
-function selectDept(code) {
-  currentDept = code;
-  sessionStorage.setItem('sozai_dept', code);
-  currentDeptObj = cachedDepartments.find(d => d.code === code) || null;
-  showRoleSelection();
-}
-
-function selectRole(role, scope) {
+function selectRole(role) {
   currentRole = role;
   sessionStorage.setItem('sozai_role', role);
-  if (role === 'admin') {
-    adminScope = scope || 'dept';
-    sessionStorage.setItem('sozai_admin_scope', adminScope);
-  } else {
-    adminScope = null;
-    sessionStorage.removeItem('sozai_admin_scope');
-  }
   document.getElementById('role-overlay').style.display = 'none';
   applyRole(role);
   applyDeptFeatures();
@@ -349,7 +298,6 @@ function selectRole(role, scope) {
 }
 
 function showRoleSelection() {
-  document.getElementById('dept-select-view').style.display = 'none';
   document.getElementById('role-select-view').style.display = '';
   document.getElementById('pin-input-view').style.display = 'none';
   document.getElementById('role-overlay').style.display = 'flex';
@@ -372,13 +320,7 @@ async function verifyPin() {
     body: JSON.stringify({pin: entered, dept: currentDept})
   }).then(r=>r.json()).catch(()=>null);
   if (res && res.ok && res.role === 'admin') {
-    // 部署別管理者は検証された部署に合わせる（通常は選択中の部署と一致）
-    if (res.scope === 'dept' && res.dept && res.dept !== currentDept) {
-      currentDept = res.dept;
-      sessionStorage.setItem('sozai_dept', res.dept);
-      currentDeptObj = cachedDepartments.find(d => d.code === res.dept) || currentDeptObj;
-    }
-    selectRole('admin', res.scope);
+    selectRole('admin');
   } else {
     document.getElementById('pin-error').textContent = 'PINコードが違います';
     document.getElementById('pin-input').value = '';
@@ -543,12 +485,8 @@ async function init() {
   document.getElementById('global-date').value = currentDate;
   document.getElementById('sidebar-date').textContent =
     d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日（'+'日月火水木金土'[d.getDay()]+'）';
-  await loadDepartments();
-  if (!currentDept) {            // 部署未選択 → 部署選択画面
-    showDeptSelection();
-    return;
-  }
-  if (!currentRole) {            // ロール未選択 → ロール選択画面
+  await loadDepartments();        // URL から部署を確定し、機能フラグ用 config を取得
+  if (!currentRole) {             // ロール未選択 → ロール選択画面（従来どおり）
     showRoleSelection();
     return;
   }
