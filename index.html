@@ -242,8 +242,9 @@
 const API = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
   ? 'http://localhost:5050/api'
   : '/api';
-const ADMIN_PIN = '1234'; // ← PINはここを変更
+// PINはサーバー側で検証する（本部=環境変数 HQ_ADMIN_PIN、部署別=hq_departments.config.admin_pin）
 let currentRole = sessionStorage.getItem('sozai_role') || null;
+let adminScope  = sessionStorage.getItem('sozai_admin_scope') || null; // 'hq' | 'dept'
 
 // ─── 部署(department) ───────────────────────────
 let currentDept       = sessionStorage.getItem('sozai_dept') || null;
@@ -293,7 +294,8 @@ function applyDeptFeatures() {
 function renderDeptSwitcher() {
   const sel = document.getElementById('dept-switcher');
   if (!sel) return;
-  const canSwitch = currentRole === 'admin' && cachedDepartments.length > 1;
+  // 全部署切替は本部管理者（adminScope==='hq'）のみ。部署別管理者は自部署に固定。
+  const canSwitch = currentRole === 'admin' && adminScope === 'hq' && cachedDepartments.length > 1;
   if (!canSwitch) { sel.style.display = 'none'; return; }
   sel.innerHTML = cachedDepartments.map(d =>
     `<option value="${d.code}" ${d.code===currentDept?'selected':''}>🏢 ${d.name}</option>`).join('');
@@ -330,9 +332,16 @@ function selectDept(code) {
   showRoleSelection();
 }
 
-function selectRole(role) {
+function selectRole(role, scope) {
   currentRole = role;
   sessionStorage.setItem('sozai_role', role);
+  if (role === 'admin') {
+    adminScope = scope || 'dept';
+    sessionStorage.setItem('sozai_admin_scope', adminScope);
+  } else {
+    adminScope = null;
+    sessionStorage.removeItem('sozai_admin_scope');
+  }
   document.getElementById('role-overlay').style.display = 'none';
   applyRole(role);
   applyDeptFeatures();
@@ -355,10 +364,21 @@ function showPinInput() {
   setTimeout(() => document.getElementById('pin-input').focus(), 100);
 }
 
-function verifyPin() {
+async function verifyPin() {
   const entered = document.getElementById('pin-input').value;
-  if (entered === ADMIN_PIN) {
-    selectRole('admin');
+  document.getElementById('pin-error').textContent = '確認中...';
+  const res = await fetch(`${API}/auth/verify-pin`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({pin: entered, dept: currentDept})
+  }).then(r=>r.json()).catch(()=>null);
+  if (res && res.ok && res.role === 'admin') {
+    // 部署別管理者は検証された部署に合わせる（通常は選択中の部署と一致）
+    if (res.scope === 'dept' && res.dept && res.dept !== currentDept) {
+      currentDept = res.dept;
+      sessionStorage.setItem('sozai_dept', res.dept);
+      currentDeptObj = cachedDepartments.find(d => d.code === res.dept) || currentDeptObj;
+    }
+    selectRole('admin', res.scope);
   } else {
     document.getElementById('pin-error').textContent = 'PINコードが違います';
     document.getElementById('pin-input').value = '';
