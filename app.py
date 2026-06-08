@@ -710,6 +710,19 @@ def build_snapshot(date_str, did):
     shifts = sb.table('hq_shifts').select('*').eq('department_id',did).eq('date',date_str).order('member_name').execute().data
     return {'actuals_detail':detail,'shifts':shifts,'channels':active_chs}
 
+def save_daily_report_row(data):
+    """hq_daily_reports への upsert を on_conflict に依存せず行う。
+    PostgREST のスキーマキャッシュ状態（複合主キーを認識できない等）に
+    左右されないよう、明示的に存在チェック → update / insert する。"""
+    did  = data.get('department_id')
+    date = data.get('date')
+    existing = sb.table('hq_daily_reports').select('date')\
+        .eq('department_id', did).eq('date', date).execute().data
+    if existing:
+        sb.table('hq_daily_reports').update(data).eq('department_id', did).eq('date', date).execute()
+    else:
+        sb.table('hq_daily_reports').insert(data).execute()
+
 def finalize_report(date_str, did, cfg):
     """date_str の日報を確定する。既に確定済みなら False。"""
     stored = sb.table('hq_daily_reports').select('expense,weather,note,finalized_at').eq('department_id',did).eq('date',date_str).execute().data
@@ -731,7 +744,7 @@ def finalize_report(date_str, did, cfg):
         'channels_snapshot': snap['channels'],
         'finalized_at':      finalize_ts(date_str),
     }
-    sb.table('hq_daily_reports').upsert(data, on_conflict='department_id,date').execute()
+    save_daily_report_row(data)
     return True
 
 @app.route('/api/daily-reports/<date_str>', methods=['GET'])
@@ -864,7 +877,7 @@ def save_daily_report(date_str):
             'material_cost':d.get('material_cost',0),'labor_cost':d.get('labor_cost',0),'expense':d.get('expense',0),
             'profit':d.get('profit',0),'labor_productivity':d.get('labor_productivity',0),'total_hours':d.get('total_hours',0),
             'west_sales':d.get('west_sales',0),'south_sales':d.get('south_sales',0),'other_sales':d.get('other_sales',0),'note':d.get('note','')}
-    sb.table('hq_daily_reports').upsert(data, on_conflict='department_id,date').execute()
+    save_daily_report_row(data)
     return jsonify({'ok': True})
 
 @app.route('/api/daily-reports/<date_str>/generate', methods=['POST'])
@@ -881,7 +894,7 @@ def generate_daily_report(date_str):
             'material_cost':calc['material_cost'],'labor_cost':calc['labor_cost'],'expense':calc['expense'],
             'profit':calc['profit'],'labor_productivity':calc['labor_productivity'],'total_hours':calc['total_hours'],
             'west_sales':calc['west_sales'],'south_sales':calc['south_sales'],'other_sales':calc['other_sales'],'note':saved_note}
-    sb.table('hq_daily_reports').upsert(data, on_conflict='department_id,date').execute()
+    save_daily_report_row(data)
     return jsonify({'ok': True, **calc})
 
 # ─── 売上実績の一括取込（過去データ・日次CSV由来） ──
@@ -962,7 +975,13 @@ def import_sales_actuals():
         imported.append(d)
 
     for j in range(0, len(upserts), 500):
-        sb.table('hq_daily_reports').upsert(upserts[j:j+500], on_conflict='department_id,date').execute()
+        chunk = upserts[j:j+500]
+        try:
+            sb.table('hq_daily_reports').upsert(chunk, on_conflict='department_id,date').execute()
+        except Exception:
+            # PostgREST が複合主キーを認識できない等で on_conflict が失敗する場合の保険
+            for row in chunk:
+                save_daily_report_row(row)
 
     return jsonify({'ok': True, 'imported': len(imported), 'imported_dates': imported,
                     'skipped': skipped, 'errors': errors, 'overwrite': overwrite})
