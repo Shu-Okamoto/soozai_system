@@ -136,7 +136,9 @@
   <nav class="sidebar">
     <div class="sidebar-logo">
       <h1>惣菜本部 業務システム</h1>
-      <p>みかわ 弁当・惣菜部</p>
+      <p id="dept-label">みかわ 弁当・惣菜部</p>
+      <select id="dept-switcher" onchange="switchDept(this.value)"
+        style="display:none;margin-top:8px;width:100%;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:#fff;border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit;cursor:pointer"></select>
     </div>
     <div class="nav-group">
       <div class="nav-label">日次業務</div>
@@ -192,8 +194,14 @@
 <div class="toast" id="toast"></div>
 
 <div id="role-overlay" style="position:fixed;inset:0;z-index:9999;background:#1A1A18;display:flex;align-items:center;justify-content:center">
+  <!-- 部署選択 -->
+  <div id="dept-select-view" style="display:none;text-align:center;color:#fff;padding:40px">
+    <div style="font-size:13px;color:rgba(255,255,255,.4);margin-bottom:8px">みかわ 惣菜本部</div>
+    <h2 style="font-size:24px;font-weight:700;margin-bottom:40px">部署を選択してください</h2>
+    <div id="dept-select-buttons" style="display:flex;gap:20px;justify-content:center;flex-wrap:wrap"></div>
+  </div>
   <!-- ロール選択 -->
-  <div id="role-select-view" style="text-align:center;color:#fff;padding:40px">
+  <div id="role-select-view" style="display:none;text-align:center;color:#fff;padding:40px">
     <div style="font-size:13px;color:rgba(255,255,255,.4);margin-bottom:8px">みかわ 弁当・惣菜部</div>
     <h2 style="font-size:24px;font-weight:700;margin-bottom:40px">惣菜本部 業務システム</h2>
     <div style="display:flex;gap:20px;justify-content:center">
@@ -237,15 +245,102 @@ const API = window.location.hostname === 'localhost' || window.location.hostname
 const ADMIN_PIN = '1234'; // ← PINはここを変更
 let currentRole = sessionStorage.getItem('sozai_role') || null;
 
+// ─── 部署(department) ───────────────────────────
+let currentDept       = sessionStorage.getItem('sozai_dept') || null;
+let cachedDepartments = [];
+let currentDeptObj    = null;
+
+// 全 API 呼び出しに ?dept=<code> を自動付与する（個々の fetch を書き換えずに一元化）
+const _origFetch = window.fetch.bind(window);
+window.fetch = function(input, opts) {
+  if (typeof input === 'string' && input.startsWith(API) && currentDept) {
+    if (!/[?&]dept=/.test(input)) {
+      input += (input.includes('?') ? '&' : '?') + 'dept=' + encodeURIComponent(currentDept);
+    }
+  }
+  return _origFetch(input, opts);
+};
+
+async function loadDepartments() {
+  try {
+    cachedDepartments = await _origFetch(API + '/departments').then(r => r.json());
+  } catch (e) { cachedDepartments = []; }
+  if (!Array.isArray(cachedDepartments) || !cachedDepartments.length) {
+    cachedDepartments = [{code:'bento', name:'弁当惣菜部',
+      config:{features:{weekly_menu:true, order_calc:true, dx_orders:true}}}];
+  }
+  if (currentDept) currentDeptObj = cachedDepartments.find(d => d.code === currentDept) || null;
+}
+
+function deptFeatures() {
+  return (currentDeptObj && currentDeptObj.config && currentDeptObj.config.features) || {};
+}
+
+// 部署の機能フラグでナビ項目を出し分け、ラベル/スイッチャーを更新
+function applyDeptFeatures() {
+  const feats = deptFeatures();
+  const gate = { menu:'weekly_menu', adminmenu:'weekly_menu', order:'order_calc' };
+  for (const [page, feat] of Object.entries(gate)) {
+    const el = document.getElementById('nav-' + page);
+    if (el) el.style.display = feats[feat] ? '' : 'none';
+  }
+  const lbl = document.getElementById('dept-label');
+  if (lbl && currentDeptObj) lbl.textContent = 'みかわ ' + currentDeptObj.name;
+  renderDeptSwitcher();
+}
+
+// 部署スイッチャー：本部（管理者ロール）かつ複数部署があるときのみ表示
+function renderDeptSwitcher() {
+  const sel = document.getElementById('dept-switcher');
+  if (!sel) return;
+  const canSwitch = currentRole === 'admin' && cachedDepartments.length > 1;
+  if (!canSwitch) { sel.style.display = 'none'; return; }
+  sel.innerHTML = cachedDepartments.map(d =>
+    `<option value="${d.code}" ${d.code===currentDept?'selected':''}>🏢 ${d.name}</option>`).join('');
+  sel.style.display = '';
+}
+
+async function switchDept(code) {
+  if (code === currentDept) return;
+  currentDept = code;
+  sessionStorage.setItem('sozai_dept', code);
+  currentDeptObj = cachedDepartments.find(d => d.code === code) || null;
+  applyDeptFeatures();
+  cachedProducts = [];
+  await initData();   // 部署のマスタを読み直して再描画
+}
+
+// 起動時：部署選択画面
+function showDeptSelection() {
+  const wrap = document.getElementById('dept-select-buttons');
+  wrap.innerHTML = cachedDepartments.map(d =>
+    `<button onclick="selectDept('${d.code}')"
+       style="background:#3B6E3F;color:#fff;border:none;border-radius:12px;padding:24px 36px;font-size:20px;font-weight:700;cursor:pointer;font-family:inherit;min-width:150px">
+       🏢 ${d.name}</button>`).join('');
+  document.getElementById('dept-select-view').style.display = '';
+  document.getElementById('role-select-view').style.display = 'none';
+  document.getElementById('pin-input-view').style.display = 'none';
+  document.getElementById('role-overlay').style.display = 'flex';
+}
+
+function selectDept(code) {
+  currentDept = code;
+  sessionStorage.setItem('sozai_dept', code);
+  currentDeptObj = cachedDepartments.find(d => d.code === code) || null;
+  showRoleSelection();
+}
+
 function selectRole(role) {
   currentRole = role;
   sessionStorage.setItem('sozai_role', role);
   document.getElementById('role-overlay').style.display = 'none';
   applyRole(role);
+  applyDeptFeatures();
   if (!cachedProducts.length) initData();
 }
 
 function showRoleSelection() {
+  document.getElementById('dept-select-view').style.display = 'none';
   document.getElementById('role-select-view').style.display = '';
   document.getElementById('pin-input-view').style.display = 'none';
   document.getElementById('role-overlay').style.display = 'flex';
@@ -313,11 +408,13 @@ async function initData() {
 }
 
 async function loadBentoOrders(targetDate) {
+  if (!deptFeatures().dx_orders) { cachedBentoOrders = []; return; }
   cachedBentoOrders = await fetch(`${API}/bento/orders?date=${targetDate}`).then(r=>r.json()).catch(()=>[]);
   if (!Array.isArray(cachedBentoOrders)) cachedBentoOrders = [];
 }
 
 async function loadInstoreOrders(targetDate) {
+  if (!deptFeatures().dx_orders) { cachedInstoreOrders = []; return; }
   cachedInstoreOrders = await fetch(`${API}/instore/orders?date=${targetDate}`).then(r=>r.json()).catch(()=>[]);
   if (!Array.isArray(cachedInstoreOrders)) cachedInstoreOrders = [];
 }
@@ -426,11 +523,18 @@ async function init() {
   document.getElementById('global-date').value = currentDate;
   document.getElementById('sidebar-date').textContent =
     d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日（'+'日月火水木金土'[d.getDay()]+'）';
-  if (!currentRole) {
-    // ロール未選択：オーバーレイを表示したまま待つ
+  await loadDepartments();
+  if (!currentDept) {            // 部署未選択 → 部署選択画面
+    showDeptSelection();
     return;
   }
+  if (!currentRole) {            // ロール未選択 → ロール選択画面
+    showRoleSelection();
+    return;
+  }
+  document.getElementById('role-overlay').style.display = 'none';
   applyRole(currentRole);
+  applyDeptFeatures();
   await initData();
 }
 
