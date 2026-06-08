@@ -20,6 +20,8 @@ soozai_system/
 ```
 
 - **DB**: Supabase（PostgreSQL）。`hq_*` テーブル群に本部データ、`dx` スキーマに店頭/弁当注文。
+- **部署(department)**: 弁当惣菜部・餅部・漬物部を1アプリで運用するマルチテナント構成。`hq_departments` に部署と設定(`config`)を持ち、`hq_members` を除く全 `hq_*` を `department_id` でスコープ。API は `?dept=<code>`（未指定時は弁当部）で部署を切替。部署ごとの材料費率・固定費・特売チャネル・機能フラグは `config` で制御。
+  - ⚠️ **デプロイ順序**: スキーマ(`schema_supabase.sql`)を先に適用してからアプリを更新すること（`department_id` を含む主キー/ユニーク制約に依存するため）。
 - **本番**: Render の Web Service（gunicorn）で配信。`/` で `index.html` を返し、`/api/*` で REST API。
 - **環境変数**: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `APP_URL`（Cron用）, `CRON_SECRET`（任意）。
 

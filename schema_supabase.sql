@@ -131,17 +131,8 @@ CREATE TABLE IF NOT EXISTS hq_checklist_records (
 );
 CREATE INDEX IF NOT EXISTS hq_checklist_records_period_idx
     ON hq_checklist_records (period_type, period_key);
--- 初期データ（現行のハードコード値を再現）
-INSERT INTO hq_categories (name, sort_order) VALUES
-    ('弁当', 1), ('寿司', 2), ('惣菜', 3), ('その他', 4)
-ON CONFLICT (name) DO NOTHING;
-INSERT INTO hq_subcategories (category_id, name, sort_order)
-SELECT c.id, s.name, s.sort_order FROM hq_categories c, (VALUES
-    ('弁当','白米',1), ('弁当','三色',2), ('弁当','ちらし',3), ('弁当','炊き込み',4),
-    ('惣菜','煮物',1), ('惣菜','酢もの',2), ('惣菜','サラダ',3), ('惣菜','魚',4),
-    ('惣菜','天ぷら',5), ('惣菜','漬物',6), ('惣菜','和え物',7), ('惣菜','揚げ物',8), ('惣菜','その他',9)
-) AS s(cat_name, name, sort_order) WHERE c.name = s.cat_name
-ON CONFLICT (category_id, name) DO NOTHING;
+-- 初期データ（弁当部のカテゴリ/サブカテゴリ）は Phase 2 のユニーク制約変更後に投入する
+-- （ファイル末尾の「初期データ」セクション参照）。
 
 -- ─── 売上実績の DX 参照用ビュー ────────────────
 -- 本部で取込んだ過去売上実績（hq_daily_reports）を DX 側システムから参照できるようにする。
@@ -214,3 +205,79 @@ BEGIN
     EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON %I (department_id);', t||'_dept_idx', t);
   END LOOP;
 END $$;
+
+-- ════════════════════════════════════════════════════════════
+-- 部署(department) 対応  [Phase 2]
+-- アプリが department_id でスコープするようになったため、ユニーク/主キーに
+-- department_id を取り込み、複数部署で同一(日付/名称/メンバー)を共存可能にする。
+-- 既存の単一部署(弁当)データには影響しない。再実行安全。
+-- 注: hq_shipping_plans / hq_shipping_actuals は UNIQUE(date,product_id,channel_id) のまま
+--     （product_id/channel_id は部署内で一意なIDのため department_id 取込は不要）。
+-- ════════════════════════════════════════════════════════════
+-- department_id を NOT NULL 化（全行 backfill 済み・既定値1）
+DO $$
+DECLARE t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'hq_products','hq_channels','hq_categories','hq_subcategories','hq_weekly_menus',
+    'hq_shipping_plans','hq_shipping_actuals','hq_shifts','hq_shift_plans',
+    'hq_daily_reports','hq_instore_orders','hq_checklist_records'
+  ] LOOP
+    EXECUTE format('UPDATE %I SET department_id = 1 WHERE department_id IS NULL;', t);
+    EXECUTE format('ALTER TABLE %I ALTER COLUMN department_id SET NOT NULL;', t);
+  END LOOP;
+END $$;
+
+-- hq_daily_reports: 主キーを (department_id, date) に変更
+ALTER TABLE hq_daily_reports DROP CONSTRAINT IF EXISTS hq_daily_reports_pkey;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='hq_daily_reports_pkey') THEN
+    ALTER TABLE hq_daily_reports ADD CONSTRAINT hq_daily_reports_pkey PRIMARY KEY (department_id, date);
+  END IF;
+END $$;
+
+-- 名称/メンバー/チェック項目のユニークに department_id を取り込む
+DO $$ BEGIN
+  -- 商品名: (department_id, name)
+  ALTER TABLE hq_products DROP CONSTRAINT IF EXISTS hq_products_name_key;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='hq_products_dept_name_key') THEN
+    ALTER TABLE hq_products ADD CONSTRAINT hq_products_dept_name_key UNIQUE (department_id, name);
+  END IF;
+  -- 出荷先名: (department_id, name)
+  ALTER TABLE hq_channels DROP CONSTRAINT IF EXISTS hq_channels_name_key;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='hq_channels_dept_name_key') THEN
+    ALTER TABLE hq_channels ADD CONSTRAINT hq_channels_dept_name_key UNIQUE (department_id, name);
+  END IF;
+  -- カテゴリ名: (department_id, name)
+  ALTER TABLE hq_categories DROP CONSTRAINT IF EXISTS hq_categories_name_key;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='hq_categories_dept_name_key') THEN
+    ALTER TABLE hq_categories ADD CONSTRAINT hq_categories_dept_name_key UNIQUE (department_id, name);
+  END IF;
+  -- シフト実績: (department_id, date, member_name)  ※メンバーは全部署共有のため必須
+  ALTER TABLE hq_shifts DROP CONSTRAINT IF EXISTS hq_shifts_date_member_name_key;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='hq_shifts_dept_date_member_key') THEN
+    ALTER TABLE hq_shifts ADD CONSTRAINT hq_shifts_dept_date_member_key UNIQUE (department_id, date, member_name);
+  END IF;
+  -- シフト予定: (department_id, date, member_name)
+  ALTER TABLE hq_shift_plans DROP CONSTRAINT IF EXISTS hq_shift_plans_date_member_name_key;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='hq_shift_plans_dept_date_member_key') THEN
+    ALTER TABLE hq_shift_plans ADD CONSTRAINT hq_shift_plans_dept_date_member_key UNIQUE (department_id, date, member_name);
+  END IF;
+  -- チェックリスト: (department_id, period_type, period_key, item_key)
+  ALTER TABLE hq_checklist_records DROP CONSTRAINT IF EXISTS hq_checklist_records_period_type_period_key_item_key_key;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='hq_checklist_dept_period_item_key') THEN
+    ALTER TABLE hq_checklist_records ADD CONSTRAINT hq_checklist_dept_period_item_key UNIQUE (department_id, period_type, period_key, item_key);
+  END IF;
+END $$;
+
+-- ─── 初期データ（弁当部のカテゴリ/サブカテゴリ。Phase 2 制約変更後に投入）──
+INSERT INTO hq_categories (department_id, name, sort_order) VALUES
+    (1,'弁当', 1), (1,'寿司', 2), (1,'惣菜', 3), (1,'その他', 4)
+ON CONFLICT (department_id, name) DO NOTHING;
+INSERT INTO hq_subcategories (department_id, category_id, name, sort_order)
+SELECT 1, c.id, s.name, s.sort_order FROM hq_categories c, (VALUES
+    ('弁当','白米',1), ('弁当','三色',2), ('弁当','ちらし',3), ('弁当','炊き込み',4),
+    ('惣菜','煮物',1), ('惣菜','酢もの',2), ('惣菜','サラダ',3), ('惣菜','魚',4),
+    ('惣菜','天ぷら',5), ('惣菜','漬物',6), ('惣菜','和え物',7), ('惣菜','揚げ物',8), ('惣菜','その他',9)
+) AS s(cat_name, name, sort_order) WHERE c.name = s.cat_name AND c.department_id = 1
+ON CONFLICT (category_id, name) DO NOTHING;
