@@ -87,6 +87,12 @@ def dept_id(code=None):
 def dept_config(d=None):
     return (d or get_dept()).get('config') or {}
 
+def is_hq_request():
+    """本部（弁当部 or config.features.hq=true の部署）からのリクエストか。
+    メンバー編集・売上実績取込など全社共通の操作は本部のみに限定する。"""
+    dep = get_dept()
+    return dep.get('code') == DEFAULT_DEPT_CODE or bool((dep.get('config') or {}).get('features', {}).get('hq'))
+
 # ─── 祝日・経費計算 ────────────────────────────
 _SHUNBUN = {2023:21,2024:20,2025:20,2026:20,2027:21,2028:20,2029:20,2030:20}
 _SHUBUN  = {2023:23,2024:22,2025:23,2026:23,2027:23,2028:22,2029:23,2030:23}
@@ -500,12 +506,16 @@ def get_members():
 
 @app.route('/api/members', methods=['POST'])
 def add_member():
+    if not is_hq_request():
+        return jsonify({'ok': False, 'error': 'メンバー編集は本部のみ可能です'}), 403
     d = request.json
     sb.table('hq_members').insert({'name':d['name'],'hourly_wage':d.get('hourly_wage',0)}).execute()
     return jsonify({'ok': True})
 
 @app.route('/api/members/<int:mid>', methods=['PUT'])
 def update_member(mid):
+    if not is_hq_request():
+        return jsonify({'ok': False, 'error': 'メンバー編集は本部のみ可能です'}), 403
     d = request.json
     sb.table('hq_members').update({'name':d['name'],'hourly_wage':d.get('hourly_wage',0),'active':d.get('active',1)}).eq('id',mid).execute()
     return jsonify({'ok': True})
@@ -913,6 +923,8 @@ def import_sales_actuals():
     取込んだ行は確定済み(finalized_at)として保存する。これをしないと
     get_daily_report の遅延確定で総売上等が 0 に再計算され消える。
     """
+    if not is_hq_request():
+        return jsonify({'ok': False, 'error': '売上実績取込は本部のみ可能です'}), 403
     payload   = request.json or {}
     rows      = payload.get('rows') or []
     overwrite = bool(payload.get('overwrite'))
