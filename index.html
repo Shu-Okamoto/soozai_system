@@ -158,7 +158,7 @@
       <button class="nav-item" onclick="showPage('monthly')" id="nav-monthly">📈 月次サマリ</button>
       <button class="nav-item" onclick="showPage('yearly')"  id="nav-yearly">📈 年次サマリ</button>
     </div>
-    <div class="nav-group admin-only">
+    <div class="nav-group admin-only" id="navgroup-data">
       <div class="nav-label">データ管理</div>
       <button class="nav-item" onclick="showPage('import')" id="nav-import">📥 売上実績取込</button>
     </div>
@@ -286,6 +286,14 @@ function applyDeptFeatures() {
   // 弁当部以外はサイドバーに部署名を表示（弁当部は従来表記のまま）
   const lbl = document.getElementById('dept-label');
   if (lbl && currentDeptObj && currentDept !== 'bento') lbl.textContent = 'みかわ ' + currentDeptObj.name;
+
+  // 本部（弁当部）のみ：データ管理（売上実績取込）とメンバーマスタを表示。
+  // メンバーは全部署共有のため、取込・メンバー編集は本部に集約する。
+  const isHQ = currentDept === 'bento' || !!feats.hq;
+  const dataGroup = document.getElementById('navgroup-data');
+  if (dataGroup) dataGroup.style.display = isHQ ? '' : 'none';
+  const navMembers = document.getElementById('nav-members');
+  if (navMembers) navMembers.style.display = isHQ ? '' : 'none';
 }
 
 function selectRole(role) {
