@@ -333,8 +333,16 @@ function applyRole(role) {
   document.querySelectorAll('.admin-only').forEach(el => {
     el.style.display = isAdmin ? '' : 'none';
   });
+  // メンバーは「出荷指示書」を非表示（実績入力中心の導線）。管理者は表示。
+  const navPlan = document.getElementById('nav-plan');
+  if (navPlan) navPlan.style.display = isAdmin ? '' : 'none';
   document.getElementById('role-label').textContent =
     (isAdmin ? '🔧 管理者' : '👤 メンバー') + '　切り替え';
+}
+
+// ログイン時の初期表示ページ。メンバーは当日の実績入力、管理者は出荷指示書。
+function defaultPage() {
+  return currentRole === 'admin' ? 'plan' : 'actual';
 }
 
 function toggleSidebar() {
@@ -366,7 +374,7 @@ async function initData() {
   } catch(e) {
     showToast('APIサーバー未起動。python app.py を実行してください。', true);
   }
-  showPage('plan');
+  showPage(defaultPage());
 }
 
 async function loadBentoOrders(targetDate) {
