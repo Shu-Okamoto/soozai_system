@@ -340,11 +340,6 @@ function applyRole(role) {
     (isAdmin ? '🔧 管理者' : '👤 メンバー') + '　切り替え';
 }
 
-// ログイン時の初期表示ページ。メンバーは当日の実績入力、管理者は出荷指示書。
-function defaultPage() {
-  return currentRole === 'admin' ? 'plan' : 'actual';
-}
-
 function toggleSidebar() {
   document.querySelector('.sidebar').classList.toggle('closed');
   document.querySelector('.main').classList.toggle('sidebar-closed');
@@ -374,7 +369,13 @@ async function initData() {
   } catch(e) {
     showToast('APIサーバー未起動。python app.py を実行してください。', true);
   }
-  showPage(defaultPage());
+  // メンバーは当日の出荷予定から実績を初期生成して実績入力へ（＝「実績入力へ」を押した状態）。
+  // 管理者は従来どおり出荷指示書を初期表示。
+  if (currentRole === 'admin') {
+    showPage('plan');
+  } else {
+    await goToActual(currentDate);
+  }
 }
 
 async function loadBentoOrders(targetDate) {
@@ -891,7 +892,13 @@ function shiftPlanWeek(deltaDays) {
 }
 
 async function goToActual(date) {
-  await fetch(`${API}/shipping-actuals/init`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({date})}).then(r=>r.json()).catch(()=>{});
+  // その日の実績がまだ無ければ、出荷予定(planned_qty)から実績を初期生成する。
+  // 既に入力済みの実績がある場合は上書きしない（再ログイン/再表示で消さない）。
+  const existing = await fetch(`${API}/shipping-actuals?date=${date}`).then(r=>r.json()).catch(()=>[]);
+  const hasActuals = Array.isArray(existing) && existing.some(r => (r.actual_qty||0) > 0);
+  if (!hasActuals) {
+    await fetch(`${API}/shipping-actuals/init`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({date})}).then(r=>r.json()).catch(()=>{});
+  }
   document.getElementById('global-date').value = date;
   currentDate = date;
   showPage('actual');
