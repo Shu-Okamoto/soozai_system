@@ -289,11 +289,15 @@ function applyDeptFeatures() {
 
   // 本部（弁当部）のみ：データ管理（売上実績取込）とメンバーマスタを表示。
   // メンバーは全部署共有のため、取込・メンバー編集は本部に集約する。
+  // ※ admin-only の表示制御は applyRole が担当。ここでは「非本部なら隠す」だけにし、
+  //   本部では applyRole の結果（管理者のみ表示）をそのまま尊重する（メンバーには出さない）。
   const isHQ = currentDept === 'bento' || !!feats.hq;
-  const dataGroup = document.getElementById('navgroup-data');
-  if (dataGroup) dataGroup.style.display = isHQ ? '' : 'none';
-  const navMembers = document.getElementById('nav-members');
-  if (navMembers) navMembers.style.display = isHQ ? '' : 'none';
+  if (!isHQ) {
+    const dataGroup = document.getElementById('navgroup-data');
+    if (dataGroup) dataGroup.style.display = 'none';
+    const navMembers = document.getElementById('nav-members');
+    if (navMembers) navMembers.style.display = 'none';
+  }
 }
 
 function selectRole(role) {
