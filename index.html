@@ -495,14 +495,11 @@ async function init() {
   document.getElementById('sidebar-date').textContent =
     d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日（'+'日月火水木金土'[d.getDay()]+'）';
   await loadDepartments();        // URL から部署を確定し、機能フラグ用 config を取得
-  if (!currentRole) {             // ロール未選択 → ロール選択画面（従来どおり）
-    showRoleSelection();
-    return;
-  }
-  document.getElementById('role-overlay').style.display = 'none';
-  applyRole(currentRole);
-  applyDeptFeatures();
-  await initData();
+  // 起動時は常にロール選択から開始する。
+  // sessionStorage の役割は同一オリジン(全部署URL)で共有されるため自動適用しない。
+  // これにより各部署の入口で毎回メンバー/管理者を選べる（管理者ログインも可能）。
+  currentRole = null;
+  showRoleSelection();
 }
 
 function onDateChange() {
