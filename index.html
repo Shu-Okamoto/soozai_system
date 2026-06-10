@@ -705,13 +705,7 @@ async function renderPlanPage() {
   document.getElementById('content').innerHTML = `
     <div class="print-header"><h2>${pageTitle}</h2><p>${todayDate}（${DOW[todayDow]}）　みかわ 惣菜部</p></div>
     <div class="print-only">
-      <span>🍚 炊飯量：<strong id="rice-calc-p">―</strong></span>
-      <span>三色：<strong id="sansyoku-calc-p">―</strong></span>
-      <span>ちらし：<strong id="chirashi-calc-p">―</strong></span>
-      <span>🥚 玉子：<strong id="tamago-calc-p">―</strong></span>
-      <span>サラダ：<strong id="bento-calc-p">―</strong></span>
-      <span>天ぷら：<strong id="tenpura-calc-p">―</strong></span>
-      <span>煮しめ：<strong id="nishime-calc-p">―</strong></span>
+      ${calcChipsPrint()}
     </div>
     <div class="no-print btn-group mb-16">
       ${isAdmin ? `<button class="btn btn-secondary btn-sm" onclick="shiftPlanWeek(-7)">◀ 前の週へ</button>
@@ -721,27 +715,7 @@ async function renderPlanPage() {
         <button class="btn btn-sm ${isDayMode?'btn-primary':'btn-secondary'}" style="padding:3px 12px" onclick="planViewMode='day';renderPlanPage()">一日</button>
         <button class="btn btn-sm ${!isDayMode?'btn-primary':'btn-secondary'}" style="padding:3px 12px" onclick="planViewMode='week';renderPlanPage()">週間</button>
       </div>` : ''}
-      <div style="background:#FFF9C4;border:1px solid #F9A825;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
-        🍚 炊飯量：<span id="rice-calc">―</span>
-      </div>
-      <div style="background:#E8F4E9;border:1px solid #3B6E3F;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
-        三色：<span id="sansyoku-calc">―</span>
-      </div>
-      <div style="background:#FCE4EC;border:1px solid #E91E63;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
-        ちらし：<span id="chirashi-calc">―</span>
-      </div>
-      <div style="background:#FFF8E1;border:1px solid #FF8F00;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
-        🥚 玉子：<span id="tamago-calc">―</span>
-      </div>
-      <div style="background:#E8F5E9;border:1px solid #388E3C;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
-        サラダ：<span id="bento-calc">―</span>
-      </div>
-      <div style="background:#FBE9E7;border:1px solid #BF360C;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
-        天ぷら：<span id="tenpura-calc">―</span>
-      </div>
-      <div style="background:#EFEBE9;border:1px solid #5D4037;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
-        煮しめ：<span id="nishime-calc">―</span>
-      </div>
+      ${calcChipsScreen()}
       <div style="margin-left:auto;display:flex;gap:8px">
         ${isAdmin ? `<button class="btn btn-secondary btn-sm" onclick="copyLastWeek('${days[0]}')">📋 前の週の予定をコピー</button>` : ''}
         ${isAdmin ? '' : `<button class="btn btn-warn btn-sm" onclick="goToActual('${todayDate}')">✏️ ${todayLabel}の実績入力へ</button>`}
@@ -761,8 +735,78 @@ async function renderPlanPage() {
   updateRiceCalc();
 }
 
-// 各種合計をリアルタイム更新
+// 計算チップ（部署別）。弁当=炊飯量/三色等、餅=白/よもぎ/きび/升もち、漬物=なし。
+function calcChipsScreen() {
+  const chip = (bg,bd,label,id) => `<div style="background:${bg};border:1px solid ${bd};border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">${label}：<span id="${id}">―</span></div>`;
+  if (currentDept === 'mochi') {
+    return chip('#FFFFFF','#9E9E9E','⚪ 白','mochi-white-calc')
+         + chip('#E8F5E9','#388E3C','🟢 よもぎ','mochi-yomogi-calc')
+         + chip('#FFF8E1','#FFB300','🟡 きび','mochi-kibi-calc')
+         + chip('#EFEBE9','#5D4037','🎂 升もち','mochi-masu-calc');
+  }
+  if (currentDept !== 'bento') return '';   // 漬物など：計算チップなし
+  return chip('#FFF9C4','#F9A825','🍚 炊飯量','rice-calc')
+       + chip('#E8F4E9','#3B6E3F','三色','sansyoku-calc')
+       + chip('#FCE4EC','#E91E63','ちらし','chirashi-calc')
+       + chip('#FFF8E1','#FF8F00','🥚 玉子','tamago-calc')
+       + chip('#E8F5E9','#388E3C','サラダ','bento-calc')
+       + chip('#FBE9E7','#BF360C','天ぷら','tenpura-calc')
+       + chip('#EFEBE9','#5D4037','煮しめ','nishime-calc');
+}
+function calcChipsPrint() {
+  const sp = (label,id) => `<span>${label}：<strong id="${id}">―</strong></span>`;
+  if (currentDept === 'mochi') {
+    return sp('⚪ 白','mochi-white-calc-p')+sp('🟢 よもぎ','mochi-yomogi-calc-p')+sp('🟡 きび','mochi-kibi-calc-p')+sp('🎂 升もち','mochi-masu-calc-p');
+  }
+  if (currentDept !== 'bento') return '';
+  return sp('🍚 炊飯量','rice-calc-p')+sp('三色','sansyoku-calc-p')+sp('ちらし','chirashi-calc-p')+sp('🥚 玉子','tamago-calc-p')+sp('サラダ','bento-calc-p')+sp('天ぷら','tenpura-calc-p')+sp('煮しめ','nishime-calc-p');
+}
+
+// 餅部：白/よもぎ/きび（32個=1升）と 升もち（1升=1.0/7合=0.7/5合=0.5/3合=0.3）を集計。
+function updateMochiCalc() {
+  const sizeSho = name => {
+    if (/一升|1升|１升/.test(name)) return 1.0;
+    if (/七合|7合|７合/.test(name)) return 0.7;
+    if (/五合|5合|５合/.test(name)) return 0.5;
+    if (/三合|3合|３合/.test(name)) return 0.3;
+    return 0;
+  };
+  const colorOf = name =>
+    name.includes('よもぎ') ? 'yomogi' :
+    name.includes('きび')   ? 'kibi'   :
+    name.includes('白')     ? 'white'  : null;
+  const prodById = {};
+  cachedProducts.forEach(p => { prodById[p.id] = p; });
+  let white=0, yomogi=0, kibi=0, masu=0;
+  document.querySelectorAll('input[type="number"][data-pid][data-cid]').forEach(inp => {
+    const p = prodById[parseInt(inp.dataset.pid)];
+    if (!p) return;
+    const v = parseInt(inp.value) || 0;
+    if (!v) return;
+    const name = p.name || '';
+    const sho = sizeSho(name);
+    if (sho > 0) { masu += v * sho; return; }   // 升もち（升単位で加算）
+    const c = colorOf(name);
+    if (c === 'white')  white  += v;
+    else if (c === 'yomogi') yomogi += v;
+    else if (c === 'kibi')   kibi   += v;
+    // 上記以外は計算に入れない
+  });
+  const fmtColor = cnt => cnt > 0 ? `${cnt}個・${(cnt/32).toFixed(2)}升` : '―';
+  const set = (id,val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
+  const out = {
+    'mochi-white-calc':  fmtColor(white),
+    'mochi-yomogi-calc': fmtColor(yomogi),
+    'mochi-kibi-calc':   fmtColor(kibi),
+    'mochi-masu-calc':   masu > 0 ? `${masu.toFixed(1)}升` : '―',
+  };
+  Object.entries(out).forEach(([id,v]) => { set(id,v); set(id+'-p',v); });
+}
+
+// 各種合計をリアルタイム更新（部署で振り分け）
 function updateRiceCalc() {
+  if (currentDept === 'mochi') { updateMochiCalc(); return; }
+  if (currentDept !== 'bento') return;   // 漬物など：計算なし
   const ricePids     = new Set(cachedProducts.filter(p=>p.subcategory==='白米').map(p=>p.id));
   const sansyokuPids = new Set(cachedProducts.filter(p=>p.subcategory==='三色').map(p=>p.id));
   const chirashiPids = new Set(cachedProducts.filter(p=>
@@ -1045,27 +1089,7 @@ async function renderActualPage() {
     <div class="no-print btn-group mb-16">
       <button class="btn btn-primary" onclick="saveActuals('${date}')" ${isFinalized?'disabled title="確定済みのため変更不可"':''}>💾 実績・シフトを保存</button>
       <button class="btn btn-warn"    onclick="generateReport('${date}')" ${isFinalized?'disabled title="確定済みのため再生成不可"':''}>📊 日報を生成する</button>
-      <div style="background:#FFF9C4;border:1px solid #F9A825;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
-        🍚 炊飯量：<span id="rice-calc">―</span>
-      </div>
-      <div style="background:#E8F4E9;border:1px solid #3B6E3F;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
-        三色：<span id="sansyoku-calc">―</span>
-      </div>
-      <div style="background:#FCE4EC;border:1px solid #E91E63;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
-        ちらし：<span id="chirashi-calc">―</span>
-      </div>
-      <div style="background:#FFF8E1;border:1px solid #FF8F00;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
-        🥚 玉子：<span id="tamago-calc">―</span>
-      </div>
-      <div style="background:#E8F5E9;border:1px solid #388E3C;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
-        サラダ：<span id="bento-calc">―</span>
-      </div>
-      <div style="background:#FBE9E7;border:1px solid #BF360C;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
-        天ぷら：<span id="tenpura-calc">―</span>
-      </div>
-      <div style="background:#EFEBE9;border:1px solid #5D4037;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px">
-        煮しめ：<span id="nishime-calc">―</span>
-      </div>
+      ${calcChipsScreen()}
       <span class="text-muted" style="font-size:12px;align-self:center">${date}</span>
     </div>
     <div style="display:grid;grid-template-columns:1fr 260px;gap:16px;align-items:start">
