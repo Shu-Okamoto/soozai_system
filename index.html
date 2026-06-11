@@ -416,7 +416,8 @@ function buildInstoreOrderRows(channels, mode) {
     const price = Math.round(o.price    || 0);
     const amt   = qty * price;
     const channelCells = channels.map(ch => {
-      const v = (o.store_id === ch.id) ? qty : 0;
+      // 店名一致を優先（部署でチャネルIDが異なるDX店頭注文に対応）、無ければID一致
+      const v = ((o.store_name && o.store_name === ch.name) || o.store_id === ch.id) ? qty : 0;
       return `<td class="${numAlign}" style="background:#FFFDE7;color:#E65100">${v || ''}</td>`;
     }).join('');
     const nameCell  = `<td class="left" style="white-space:nowrap;color:#E65100;background:#FFFDE7">${o.product_name||''}（${o.customer_name?o.customer_name+'様':''}）</td>`;
