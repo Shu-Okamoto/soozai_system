@@ -755,7 +755,8 @@ function calcChipsScreen() {
        + chip('#FFF8E1','#FF8F00','🥚 玉子','tamago-calc')
        + chip('#E8F5E9','#388E3C','サラダ','bento-calc')
        + chip('#FBE9E7','#BF360C','天ぷら','tenpura-calc')
-       + chip('#EFEBE9','#5D4037','煮しめ','nishime-calc');
+       + chip('#EFEBE9','#5D4037','煮しめ','nishime-calc')
+       + chip('#EDE7F6','#5E35B1','🍣 助六','sukoroku-calc');
 }
 function calcChipsPrint() {
   const sp = (label,id) => `<span>${label}：<strong id="${id}">―</strong></span>`;
@@ -763,7 +764,7 @@ function calcChipsPrint() {
     return sp('⚪ 白','mochi-white-calc-p')+sp('🟢 よもぎ','mochi-yomogi-calc-p')+sp('🟡 きび','mochi-kibi-calc-p')+sp('🎂 升もち','mochi-masu-calc-p');
   }
   if (currentDept !== 'bento') return '';
-  return sp('🍚 炊飯量','rice-calc-p')+sp('三色','sansyoku-calc-p')+sp('ちらし','chirashi-calc-p')+sp('🥚 玉子','tamago-calc-p')+sp('サラダ','bento-calc-p')+sp('天ぷら','tenpura-calc-p')+sp('煮しめ','nishime-calc-p');
+  return sp('🍚 炊飯量','rice-calc-p')+sp('三色','sansyoku-calc-p')+sp('ちらし','chirashi-calc-p')+sp('🥚 玉子','tamago-calc-p')+sp('サラダ','bento-calc-p')+sp('天ぷら','tenpura-calc-p')+sp('煮しめ','nishime-calc-p')+sp('🍣 助六','sukoroku-calc-p');
 }
 
 // 餅部：白/よもぎ/きび（32個=1升）と 升もち（1升=1.0/7合=0.7/5合=0.5/3合=0.3）を集計。
@@ -832,7 +833,7 @@ function updateRiceCalc() {
     p.category==='弁当' && (Number(p.price)||0) >= 1500
   ).map(p=>p.id));
 
-  let riceTotal=0, sansyokuTotal=0, chirashiTotal=0, tamagoTotal=0, saladTotal=0, bentoTotal=0, tenpuraTotal=0, nishimeTotal=0;
+  let riceTotal=0, sansyokuTotal=0, chirashiTotal=0, tamagoTotal=0, saladTotal=0, bentoTotal=0, tenpuraTotal=0, nishimeTotal=0, sukorokuTotal=0;
   document.querySelectorAll('input[type="number"][data-pid][data-cid]').forEach(inp => {
     const pid = parseInt(inp.dataset.pid);
     const v   = parseInt(inp.value) || 0;
@@ -852,6 +853,10 @@ function updateRiceCalc() {
     const v     = Math.round(o.quantity || 0);
     const price = Math.round(Number(o.price) || 0);
     if (!v) return;
+    // 助六：他には一切加算せず、助六チップにのみ計上
+    if (name.includes('助六')) { sukorokuTotal += v; return; }
+    // 取込品の単価が500円以下は何も加算しない
+    if (price <= 500) return;
     const isSansyoku = name.includes('三色');
     const isChirashi = name.includes('ちらし') || name.includes('色彩');
     const isBento    = cat === '弁当' || name.includes('おかずセット');
@@ -883,6 +888,7 @@ function updateRiceCalc() {
     'bento-calc':    bentoTotal    > 0 ? bentoTotal+'個' : '―',
     'tenpura-calc':  tenpuraTotal  > 0 ? tenpuraTotal+'個' : '―',
     'nishime-calc':  nishimeTotal  > 0 ? nishimeTotal+'個' : '―',
+    'sukoroku-calc': sukorokuTotal > 0 ? sukorokuTotal+'個' : '―',
   };
   Object.entries(vals).forEach(([id, v]) => { set(id, v); set(id+'-p', v); });
 }
