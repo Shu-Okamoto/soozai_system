@@ -855,8 +855,8 @@ function updateRiceCalc() {
     if (!v) return;
     // 助六：他には一切加算せず、助六チップにのみ計上
     if (name.includes('助六')) { sukorokuTotal += v; return; }
-    // 取込品の単価が500円以下は何も加算しない
-    if (price <= 500) return;
+    // 取込品の単価が500円未満は何も加算しない（500円ちょうどは加算対象）
+    if (price < 500) return;
     const isSansyoku = name.includes('三色');
     const isChirashi = name.includes('ちらし') || name.includes('色彩');
     const isBento    = cat === '弁当' || name.includes('おかずセット');
