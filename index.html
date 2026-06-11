@@ -391,7 +391,7 @@ async function initData() {
 }
 
 async function loadBentoOrders(targetDate) {
-  if (!deptFeatures().dx_orders) { cachedBentoOrders = []; return; }
+  if (currentDept !== 'bento') { cachedBentoOrders = []; return; }  // 弁当アプリ配達注文は弁当部のみ
   cachedBentoOrders = await fetch(`${API}/bento/orders?date=${targetDate}`).then(r=>r.json()).catch(()=>[]);
   if (!Array.isArray(cachedBentoOrders)) cachedBentoOrders = [];
 }
@@ -404,6 +404,9 @@ async function loadInstoreOrders(targetDate) {
 
 // dx 店頭注文の行HTMLを返す（plan / actual / report 共通）
 // mode: 'plan' | 'actual' | 'report'
+// DX注文行を表示する対象カテゴリ（弁当部=弁当、餅部=餅）
+function orderRowsCat() { return currentDept === 'mochi' ? '餅' : '弁当'; }
+
 function buildInstoreOrderRows(channels, mode) {
   if (!Array.isArray(cachedInstoreOrders) || !cachedInstoreOrders.length) return '';
   const numAlign   = mode === 'report' ? 'text-right' : 'text-center';
@@ -616,8 +619,8 @@ async function renderPlanPage() {
           <td class="fw-bold" style="background:#F0F7F0" id="rt_${p.id}_${targetDate}">${rowTotal||''}</td>
         </tr>`;
       });
-      if (cat === '弁当') {
-        // dx 店頭注文 + bento 注文を 弁当 末尾に行追加（read-only）
+      if (cat === orderRowsCat()) {
+        // dx 店頭注文 + bento 注文を対象カテゴリ末尾に行追加（read-only）
         body += buildInstoreOrderRows(chs, 'plan');
         body += buildBentoOrderRows(chs, 'plan');
       }
@@ -1035,8 +1038,8 @@ async function renderActualPage() {
         <td class="fw-bold" style="background:#F0F7F0;text-align:center" id="at_${p.id}">${actualTotal||''}</td>
       </tr>`;
     });
-    if (cat === '弁当') {
-      // dx 店頭注文 + bento 注文を 弁当 末尾に行追加（read-only）
+    if (cat === orderRowsCat()) {
+      // dx 店頭注文 + bento 注文を対象カテゴリ末尾に行追加（read-only）
       tableBody += buildInstoreOrderRows(chs, 'actual');
       tableBody += buildBentoOrderRows(chs, 'actual');
     }

@@ -635,25 +635,31 @@ def calc_daily_report(target_date, did, cfg, expense_override=None):
     west  = sum(r['actual_amount'] for r in actuals if west_name  and channels.get(r['channel_id'])==west_name)
     south = sum(r['actual_amount'] for r in actuals if south_name and channels.get(r['channel_id'])==south_name)
 
-    # dx 店頭注文／bento アプリ注文の合算は dx_orders 機能が有効な部署（弁当部）のみ
+    # dx 店頭注文の合算（dx_orders 機能のある部署：弁当=餅以外 / 餅部=餅のみ。取込時にカテゴリ振り分け済み）
     if feats.get('dx_orders'):
-        # dx 店頭注文を合算（store_id→channel で west/south/other に振り分け）
+        has_split = bool(west_name or south_name)
         instore_rows = sb.table('hq_instore_orders').select('store_id,quantity,price').eq('department_id',did).eq('date',target_date).execute().data
         for r in instore_rows:
-            sid = r.get('store_id')
-            if sid not in active_cids: continue
             amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
-            total += amt
-            cname = channels.get(sid)
-            if   west_name  and cname == west_name:  west  += amt
-            elif south_name and cname == south_name: south += amt
+            if has_split:
+                # 店別振り分けのある部署（弁当）：有効チャネルのみ・west/south へ振り分け
+                sid = r.get('store_id')
+                if sid not in active_cids: continue
+                total += amt
+                cname = channels.get(sid)
+                if   west_name  and cname == west_name:  west  += amt
+                elif south_name and cname == south_name: south += amt
+            else:
+                total += amt  # 店別振り分けの無い部署（餅部）は全額を売上(other)へ
 
-        # bento システム注文を合算（すべて 配達 チャネル → other 扱い）
-        try:
-            bento_orders = sb.table('orders').select('product_id,quantity')\
-                .eq('delivery_date',target_date).execute().data
-        except Exception:
-            bento_orders = []
+        # bento システム注文（配達弁当）は弁当アプリ由来。店頭カテゴリ限定の部署（餅部）では取り込まない
+        bento_orders = []
+        if not cfg.get('dx_instore_only'):
+            try:
+                bento_orders = sb.table('orders').select('product_id,quantity')\
+                    .eq('delivery_date',target_date).execute().data
+            except Exception:
+                bento_orders = []
         if bento_orders:
             bento_pids = list({o['product_id'] for o in bento_orders if o.get('product_id')})
             try:
@@ -1019,8 +1025,9 @@ def _year_range(year):
 def monthly_summary():
     ym   = request.args.get('month')
     dep = get_dept(); did = dep['id']; feats = (dep.get('config') or {}).get('features') or {}
+    only_cats = (dep.get('config') or {}).get('dx_instore_only')   # 餅部=["餅"]
     rows = sb.table('hq_daily_reports').select('*').eq('department_id',did).like('date',ym+'%').order('date').execute().data
-    # 注文売上を期間集計。dx 店頭注文と bento アプリ注文は dx_orders 機能のある部署のみ
+    # 注文売上を期間集計。店頭注文は dx_orders 機能のある部署、bento アプリ注文は弁当部のみ
     instore_by_date = {}
     bento_by_date = {}
     if feats.get('dx_orders'):
@@ -1033,7 +1040,7 @@ def monthly_summary():
     start, end = _month_range(ym)
     try:
         bento_orders = sb.table('orders').select('delivery_date,product_id,quantity')\
-            .gte('delivery_date',start).lt('delivery_date',end).execute().data if feats.get('dx_orders') else []
+            .gte('delivery_date',start).lt('delivery_date',end).execute().data if (feats.get('dx_orders') and not only_cats) else []
     except Exception:
         bento_orders = []
     if bento_orders:
@@ -1085,6 +1092,7 @@ def monthly_summary():
 def yearly_summary():
     year = request.args.get('year')
     dep = get_dept(); did = dep['id']; feats = (dep.get('config') or {}).get('features') or {}
+    only_cats = (dep.get('config') or {}).get('dx_instore_only')   # 餅部=["餅"]
     rows = sb.table('hq_daily_reports').select('*').eq('department_id',did).like('date',year+'%').order('date').execute().data
     # 注文売上を日別集計（月別ではなく）。日報がある日付の分だけ後で月集計に組み入れる
     instore_by_date = {}
@@ -1100,7 +1108,7 @@ def yearly_summary():
     start, end = _year_range(year)
     try:
         bento_orders = sb.table('orders').select('delivery_date,product_id,quantity')\
-            .gte('delivery_date',start).lt('delivery_date',end).execute().data if feats.get('dx_orders') else []
+            .gte('delivery_date',start).lt('delivery_date',end).execute().data if (feats.get('dx_orders') and not only_cats) else []
     except Exception:
         bento_orders = []
     if bento_orders:
@@ -1278,7 +1286,8 @@ def get_instore_orders():
     """dx.InstoreOrder + dx.OrderProduct から取得し hq_instore_orders に mirror して返す。
     過去日は dx を叩かず hq の保存値だけ返す（履歴凍結）。"""
     target_date = request.args.get('date')
-    did = dept_id()
+    dep = get_dept(); did = dep['id']
+    only_cats = (dep.get('config') or {}).get('dx_instore_only')  # 餅部=["餅"]、弁当部=None
     if not target_date:
         return jsonify({'error':'date required'}), 400
 
@@ -1319,8 +1328,11 @@ def get_instore_orders():
     def _category_of(o):
         return (prod_map.get(o['productName']) or {}).get('category') or o.get('category')
 
-    # 餅カテゴリは取り込まない（マスタ／カスタム追加とも対象外）
-    dx_orders = [o for o in dx_orders if _category_of(o) != '餅']
+    # カテゴリで部署へ振り分け：餅部(only_cats=["餅"])は餅のみ、弁当部は餅以外を取り込む
+    if only_cats:
+        dx_orders = [o for o in dx_orders if _category_of(o) in only_cats]
+    else:
+        dx_orders = [o for o in dx_orders if _category_of(o) != '餅']
 
     mirror_rows = []
     for o in dx_orders:
