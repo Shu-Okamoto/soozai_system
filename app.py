@@ -639,18 +639,21 @@ def calc_daily_report(target_date, did, cfg, expense_override=None):
     if feats.get('dx_orders'):
         has_split = bool(west_name or south_name)
         instore_rows = sb.table('hq_instore_orders').select('store_id,quantity,price').eq('department_id',did).eq('date',target_date).execute().data
+        # store_id は全社共通の物理店舗ID。店名を全部署横断で解決し、店名で西/南へ振り分ける
+        # （餅部のチャネルIDは弁当部と異なるため、ID一致ではなく店名で判定する）
+        name_by_sid = {}
+        if has_split:
+            sids = list({r.get('store_id') for r in instore_rows if r.get('store_id') is not None})
+            if sids:
+                for c in sb.table('hq_channels').select('id,name').in_('id', sids).execute().data:
+                    name_by_sid[c['id']] = c['name']
         for r in instore_rows:
             amt = int(round(float(r.get('quantity') or 0)) * round(float(r.get('price') or 0)))
+            total += amt
             if has_split:
-                # 店別振り分けのある部署（弁当）：有効チャネルのみ・west/south へ振り分け
-                sid = r.get('store_id')
-                if sid not in active_cids: continue
-                total += amt
-                cname = channels.get(sid)
+                cname = name_by_sid.get(r.get('store_id'))
                 if   west_name  and cname == west_name:  west  += amt
                 elif south_name and cname == south_name: south += amt
-            else:
-                total += amt  # 店別振り分けの無い部署（餅部）は全額を売上(other)へ
 
         # bento システム注文（配達弁当）は弁当アプリ由来。店頭カテゴリ限定の部署（餅部）では取り込まない
         bento_orders = []
@@ -1292,9 +1295,19 @@ def get_instore_orders():
         return jsonify({'error':'date required'}), 400
 
     def _normalize(rows):
+        # store_id→店名を全社横断で解決して付与（フロントは店名で店舗列に振り分ける）
+        sids = list({r.get('store_id') for r in rows if r.get('store_id') is not None})
+        name_by_sid = {}
+        if sids:
+            try:
+                for c in sb.table('hq_channels').select('id,name').in_('id', sids).execute().data:
+                    name_by_sid[c['id']] = c['name']
+            except Exception:
+                pass
         for r in rows:
             if r.get('price')    is not None: r['price']    = int(round(float(r['price'])))
             if r.get('quantity') is not None: r['quantity'] = int(r['quantity'])
+            r['store_name'] = name_by_sid.get(r.get('store_id'), '')
         return rows
 
     # 過去日 → hq のキャッシュだけ返す

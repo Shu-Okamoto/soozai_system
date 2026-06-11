@@ -181,7 +181,7 @@ INSERT INTO hq_departments (id, code, name, sort_order, config) VALUES
  (1,'bento','弁当惣菜部',1,
    '{"monthly_fixed_cost":300000,"material_rate":0.5,"sales_split":{"west":"西店","south":"南店"},"features":{"weekly_menu":true,"order_calc":true,"dx_orders":true,"npo_adjust":true,"separate_orders":true}}'::jsonb),
  (2,'mochi','餅部',2,
-   '{"monthly_fixed_cost":70000,"material_rate":0.5,"sales_split":{},"dx_instore_only":["餅"],"features":{"dx_orders":true}}'::jsonb),
+   '{"monthly_fixed_cost":70000,"material_rate":0.5,"sales_split":{"west":"西店","south":"南店"},"dx_instore_only":["餅"],"features":{"dx_orders":true}}'::jsonb),
  (3,'tsukemono','漬物部',3,
    '{"monthly_fixed_cost":70000,"material_rate":0.5,"sales_split":{},"features":{}}'::jsonb)
 ON CONFLICT (id) DO NOTHING;
