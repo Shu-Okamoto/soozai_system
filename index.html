@@ -832,11 +832,17 @@ function updateRiceCalc() {
   const nishimePids  = new Set(cachedProducts.filter(p=>
     p.category==='弁当' && (Number(p.price)||0) >= 1500
   ).map(p=>p.id));
+  const sukorokuPids = new Set(cachedProducts.filter(p=>
+    (p.category==='弁当' || p.category==='寿司') && p.name.includes('助六')
+  ).map(p=>p.id));
 
   let riceTotal=0, sansyokuTotal=0, chirashiTotal=0, tamagoTotal=0, saladTotal=0, bentoTotal=0, tenpuraTotal=0, nishimeTotal=0, sukorokuTotal=0;
   document.querySelectorAll('input[type="number"][data-pid][data-cid]').forEach(inp => {
     const pid = parseInt(inp.dataset.pid);
     const v   = parseInt(inp.value) || 0;
+    if (!v) return;
+    // 助六：他には一切加算せず、助六チップにのみ計上
+    if (sukorokuPids.has(pid)) { sukorokuTotal += v; return; }
     if (ricePids.has(pid))     riceTotal     += v;
     if (sansyokuPids.has(pid)) sansyokuTotal += v;
     if (chirashiPids.has(pid)) chirashiTotal += v;
