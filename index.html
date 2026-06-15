@@ -722,7 +722,7 @@ async function renderPlanPage() {
       ${calcChipsScreen()}
       <div style="margin-left:auto;display:flex;gap:8px">
         ${isAdmin ? `<button class="btn btn-secondary btn-sm" onclick="copyLastWeek('${days[0]}')">📋 前の週の予定をコピー</button>` : ''}
-        ${isAdmin ? '' : `<button class="btn btn-warn btn-sm" onclick="goToActual('${todayDate}')">✏️ ${todayLabel}の実績入力へ</button>`}
+        ${isAdmin ? '' : `<button class="btn btn-warn btn-sm" onclick="saveAndGoToActual('${todayDate}')">✏️ ${todayLabel}の実績入力へ（保存して移動）</button>`}
         <button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 ${todayLabel}を印刷</button>
       </div>
     </div>
@@ -938,7 +938,7 @@ async function savePlans(reflectDate) {
   });
   const r = await fetch(`${API}/shipping-plans/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({dates:[...dateSet], items})}).then(r=>r.json()).catch(()=>null);
-  if (!r?.ok) { showToast('保存失敗',true); return; }
+  if (!r?.ok) { showToast('保存失敗',true); return false; }
   dirty=false;
   if (reflectDate) {
     await fetch(`${API}/shipping-actuals/init`,{method:'POST',headers:{'Content-Type':'application/json'},
@@ -947,6 +947,16 @@ async function savePlans(reflectDate) {
   } else {
     showToast(`${items.length}件保存しました`);
   }
+  return true;
+}
+
+// 出荷指示書の「実績入力へ」ボタン：計画を保存→その日の実績へ反映（空欄のみ補完）→実績入力画面へ遷移。
+async function saveAndGoToActual(date) {
+  const ok = await savePlans(date);
+  if (!ok) return;            // 保存失敗時は遷移しない
+  document.getElementById('global-date').value = date;
+  currentDate = date;
+  showPage('actual');
 }
 
 async function copyLastWeek(dstFrom) {
