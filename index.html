@@ -714,7 +714,7 @@ async function renderPlanPage() {
     <div class="no-print btn-group mb-16">
       ${isAdmin ? `<button class="btn btn-secondary btn-sm" onclick="shiftPlanWeek(-7)">◀ 前の週へ</button>
       <button class="btn btn-secondary btn-sm" onclick="shiftPlanWeek(7)">次の週へ ▶</button>` : ''}
-      <button class="btn btn-primary btn-sm" onclick="savePlans()">💾 保存</button>
+      <button class="btn btn-primary btn-sm" onclick="savePlans(${isAdmin ? '' : `'${todayDate}'`})">💾 ${isAdmin ? '保存' : '調整保存（実績へ反映）'}</button>
       ${isAdmin ? `<div style="display:flex;gap:6px;margin:0 8px;background:var(--surface2);border-radius:6px;padding:3px;border:1px solid var(--border)">
         <button class="btn btn-sm ${isDayMode?'btn-primary':'btn-secondary'}" style="padding:3px 12px" onclick="planViewMode='day';renderPlanPage()">一日</button>
         <button class="btn btn-sm ${!isDayMode?'btn-primary':'btn-secondary'}" style="padding:3px 12px" onclick="planViewMode='week';renderPlanPage()">週間</button>
@@ -925,7 +925,9 @@ function updateRowTotal(inp) {
 
 let dirty = false;
 
-async function savePlans() {
+// reflectDate を渡すと、計画保存後にその日の出荷実績入力へ数を反映する（空欄のみ補完・手入力は残す）。
+// 出荷指示書（調整保存）から呼ばれる。週間予定数入力(adminplan)からは引数なしで保存のみ。
+async function savePlans(reflectDate) {
   const inputs = document.querySelectorAll('#plan-table input[type="number"]');
   const items = [];
   const dateSet = new Set();
@@ -936,8 +938,15 @@ async function savePlans() {
   });
   const r = await fetch(`${API}/shipping-plans/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({dates:[...dateSet], items})}).then(r=>r.json()).catch(()=>null);
-  if (r?.ok) { showToast(`${items.length}件保存しました`); dirty=false; }
-  else showToast('保存失敗',true);
+  if (!r?.ok) { showToast('保存失敗',true); return; }
+  dirty=false;
+  if (reflectDate) {
+    await fetch(`${API}/shipping-actuals/init`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({date:reflectDate, only_empty:true})}).then(r=>r.json()).catch(()=>{});
+    showToast(`${items.length}件保存し、実績入力へ反映しました`);
+  } else {
+    showToast(`${items.length}件保存しました`);
+  }
 }
 
 async function copyLastWeek(dstFrom) {
