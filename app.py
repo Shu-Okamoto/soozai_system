@@ -449,13 +449,23 @@ def get_shipping_actuals():
 
 @app.route('/api/shipping-actuals/init', methods=['POST'])
 def init_actuals_from_plan():
-    target_date = request.json.get('date')
+    body = request.json or {}
+    target_date = body.get('date')
+    # only_empty=True: 既に実績が入っている (product_id, channel_id) は触らず、
+    # 空欄（未入力）のセルだけ計画値で補完する（調整保存→実績反映で手入力を消さないため）。
+    only_empty = bool(body.get('only_empty'))
     did = dept_id()
     plans = sb.table('hq_shipping_plans').select('*').eq('department_id',did).eq('date',target_date).gt('planned_qty',0).execute().data
     pids  = list({p['product_id'] for p in plans})
     prods = {p['id']:p for p in sb.table('hq_products').select('id,price').in_('id',pids).execute().data} if pids else {}
+    filled = set()
+    if only_empty:
+        ex = sb.table('hq_shipping_actuals').select('product_id,channel_id,actual_qty')\
+            .eq('department_id',did).eq('date',target_date).execute().data
+        filled = {(r['product_id'], r['channel_id']) for r in ex if (r.get('actual_qty') or 0) > 0}
     rows  = [{'date':target_date,'product_id':p['product_id'],'channel_id':p['channel_id'],
-              'actual_qty':p['planned_qty'],'actual_amount':p['planned_qty']*prods.get(p['product_id'],{}).get('price',0),'department_id':did} for p in plans]
+              'actual_qty':p['planned_qty'],'actual_amount':p['planned_qty']*prods.get(p['product_id'],{}).get('price',0),'department_id':did}
+             for p in plans if (p['product_id'], p['channel_id']) not in filled]
     if rows:
         sb.table('hq_shipping_actuals').upsert(rows, on_conflict='date,product_id,channel_id').execute()
     return jsonify({'ok': True})
