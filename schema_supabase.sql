@@ -284,3 +284,53 @@ SELECT 1, c.id, s.name, s.sort_order FROM hq_categories c, (VALUES
     ('惣菜','天ぷら',5), ('惣菜','漬物',6), ('惣菜','和え物',7), ('惣菜','揚げ物',8), ('惣菜','その他',9)
 ) AS s(cat_name, name, sort_order) WHERE c.name = s.cat_name AND c.department_id = 1
 ON CONFLICT (category_id, name) DO NOTHING;
+
+-- ════════════════════════════════════════════════════════════
+-- 原材料発注  [Phase 3]
+-- カテゴリ選択 → 商品表示 → 在庫数入力 → 発注数(=基準数-在庫数、発注数単位があれば
+-- 一番近い倍数に四捨五入)を算出して日付ごとに保存する。
+-- すべて部署(department_id)でスコープ。再実行安全（idempotent）。
+-- ════════════════════════════════════════════════════════════
+-- 業者マスタ（発注先）
+CREATE TABLE IF NOT EXISTS hq_suppliers (
+    id            BIGSERIAL PRIMARY KEY,
+    department_id BIGINT NOT NULL DEFAULT 1 REFERENCES hq_departments(id),
+    name          TEXT NOT NULL,           -- 業者名
+    order_days    TEXT DEFAULT '',         -- 発注曜日（例: "月,木"）
+    delivery_days TEXT DEFAULT '',         -- 納品曜日（例: "火,金"）
+    phone         TEXT DEFAULT '',         -- 電話番号
+    site_url      TEXT DEFAULT '',         -- サイトURL
+    sort_order    INTEGER DEFAULT 0,
+    active        INTEGER DEFAULT 1,
+    UNIQUE (department_id, name)
+);
+CREATE INDEX IF NOT EXISTS hq_suppliers_dept_idx ON hq_suppliers (department_id);
+
+-- 発注商品マスタ
+CREATE TABLE IF NOT EXISTS hq_order_products (
+    id            BIGSERIAL PRIMARY KEY,
+    department_id BIGINT NOT NULL DEFAULT 1 REFERENCES hq_departments(id),
+    name          TEXT NOT NULL,           -- 商品名
+    category      TEXT DEFAULT '',         -- 発注用の独自カテゴリ（肉・魚・調味料 等）
+    price         INTEGER DEFAULT 0,       -- 価格
+    supplier_id   BIGINT REFERENCES hq_suppliers(id) ON DELETE SET NULL,  -- 業者
+    base_qty      INTEGER DEFAULT 0,       -- 基準数
+    order_unit    INTEGER DEFAULT 0,       -- 発注数単位（0/NULL=単位指定なし）
+    sort_order    INTEGER DEFAULT 0,
+    active        INTEGER DEFAULT 1,
+    UNIQUE (department_id, name)
+);
+CREATE INDEX IF NOT EXISTS hq_order_products_dept_idx ON hq_order_products (department_id);
+
+-- 原材料発注 実績（日付 × 発注商品 の在庫数・算出した発注数）
+CREATE TABLE IF NOT EXISTS hq_material_orders (
+    id               BIGSERIAL PRIMARY KEY,
+    department_id    BIGINT NOT NULL DEFAULT 1 REFERENCES hq_departments(id),
+    date             TEXT NOT NULL,
+    order_product_id BIGINT NOT NULL REFERENCES hq_order_products(id) ON DELETE CASCADE,
+    stock_qty        INTEGER DEFAULT 0,    -- 在庫数
+    order_qty        INTEGER DEFAULT 0,    -- 発注数（保存時点の算出値）
+    updated_at       TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (department_id, date, order_product_id)
+);
+CREATE INDEX IF NOT EXISTS hq_material_orders_date_idx ON hq_material_orders (department_id, date);

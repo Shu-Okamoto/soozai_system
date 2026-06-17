@@ -167,6 +167,8 @@
       <button class="nav-item" onclick="showPage('master')"     id="nav-master">⚙️ 商品マスタ</button>
       <button class="nav-item" onclick="showPage('categories')" id="nav-categories">🏷 カテゴリマスタ</button>
       <button class="nav-item" onclick="showPage('channels')"   id="nav-channels">🏪 出荷先マスタ</button>
+      <button class="nav-item" onclick="showPage('orderproducts')" id="nav-orderproducts">🧾 発注商品マスタ</button>
+      <button class="nav-item" onclick="showPage('suppliers')"  id="nav-suppliers">🚚 業者マスタ</button>
       <button class="nav-item" onclick="showPage('members')"    id="nav-members">👤 メンバーマスタ</button>
     </div>
     <div class="sidebar-bottom">
@@ -527,15 +529,20 @@ function showPage(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:'出荷先マスタ',members:'メンバーマスタ',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成',import:'売上実績取込'};
+  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:'出荷先マスタ',orderproducts:'発注商品マスタ',suppliers:'業者マスタ',members:'メンバーマスタ',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成',import:'売上実績取込'};
   document.getElementById('page-title').textContent = titles[page]||'';
   ({plan:renderPlanPage,actual:renderActualPage,report:renderReportPage,
-    menu:renderMenuPage,order:renderOrderPage,checklist:renderChecklistPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,members:renderMembersPage,
+    menu:renderMenuPage,order:renderOrderPage,checklist:renderChecklistPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,orderproducts:renderOrderProductsPage,suppliers:renderSuppliersPage,members:renderMembersPage,
     adminplan:renderAdminPlanPage,adminmenu:renderAdminMenuPage,adminshifts:renderAdminShiftsPage,import:renderImportPage})[page]?.();
 }
 
 function setLoading() {
   document.getElementById('content').innerHTML = '<div class="loading"><div class="spinner"></div>読み込み中...</div>';
+}
+
+// HTML属性に安全に埋め込むためのエスケープ（業者名・URL等のマスタ値用）
+function esc(v) {
+  return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 function showToast(msg, isErr=false) {
@@ -1903,15 +1910,165 @@ function renderOrderPage() {
     </div>`;
 }
 
-function renderOrderMaterialPage() {
+// 発注数 = 基準数 - 在庫数（0未満は0）。発注数単位があれば一番近い倍数に四捨五入。
+// サーバー側 calc_order_qty と同じロジック（保存時はサーバー値が正）。
+function calcOrderQty(baseQty, stockQty, orderUnit) {
+  const need = (baseQty||0) - (stockQty||0);
+  if (need <= 0) return 0;
+  const unit = orderUnit||0;
+  if (unit > 0) return Math.floor(need/unit + 0.5) * unit;
+  return need;
+}
+
+let materialOrderState = { date:null, category:null, products:[], suppliers:{}, saved:{} };
+
+async function renderOrderMaterialPage() {
+  setLoading();
+  const date = currentDate;
+  const [products, suppliers, saved] = await Promise.all([
+    fetch(`${API}/order-products`).then(r=>r.json()).catch(()=>[]),
+    fetch(`${API}/suppliers`).then(r=>r.json()).catch(()=>[]),
+    fetch(`${API}/material-orders?date=${date}`).then(r=>r.json()).catch(()=>[]),
+  ]);
+  const supMap = {};
+  suppliers.forEach(s => supMap[s.id] = s);
+  const savedMap = {};
+  saved.forEach(m => savedMap[m.order_product_id] = m.stock_qty);
+  materialOrderState = { date, products, suppliers:supMap, saved:savedMap,
+    category: materialOrderState.category };
+  drawMaterialOrderPage();
+}
+
+function drawMaterialOrderPage() {
+  const { date, products } = materialOrderState;
+  // カテゴリ一覧（発注商品から抽出）
+  const cats = [...new Set(products.map(p => p.category || '未分類'))];
+  if (!cats.includes(materialOrderState.category)) materialOrderState.category = cats[0] || null;
+
+  if (!products.length) {
+    document.getElementById('content').innerHTML = `
+      <div style="max-width:640px;margin:24px auto;padding:0 16px">
+        <button onclick="renderOrderPage()" class="btn btn-secondary btn-sm" style="margin-bottom:16px">← 発注メニュー</button>
+        <div style="text-align:center;padding:48px 20px;color:var(--text2)">
+          <div style="font-size:48px;margin-bottom:12px">🧾</div>
+          <p>発注商品が登録されていません。</p>
+          <p style="font-size:13px">管理者の「発注商品マスタ」「業者マスタ」から登録してください。</p>
+        </div>
+      </div>`;
+    return;
+  }
+
+  const catTabs = cats.map(c => `
+    <button onclick="selectOrderCategory('${c.replace(/'/g,"\\'")}')"
+      class="btn btn-sm ${c===materialOrderState.category?'btn-primary':'btn-secondary'}"
+      style="margin:0 6px 6px 0">${c}</button>`).join('');
+
   document.getElementById('content').innerHTML = `
-    <div style="text-align:center;padding:60px 20px;color:var(--text2)">
-      <div style="font-size:64px;margin-bottom:16px">🍱</div>
-      <h2 style="font-size:22px;font-weight:700;margin-bottom:12px;color:var(--text)">原材料発注は準備中です</h2>
-      <p style="font-size:14px;margin-bottom:24px">仕様が固まり次第こちらに実装します。</p>
-      <button onclick="renderOrderPage()"
-        style="background:rgba(0,0,0,.05);border:1px solid var(--border);padding:8px 20px;border-radius:8px;cursor:pointer;font-family:inherit;color:inherit">← 発注メニューに戻る</button>
+    <div style="max-width:920px;margin:0 auto">
+      <div class="no-print" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+        <button onclick="renderOrderPage()" class="btn btn-secondary btn-sm">← 発注メニュー</button>
+        <label style="font-size:13px;color:var(--text2)">対象日</label>
+        <input type="date" value="${date}" onchange="currentDate=this.value;renderOrderMaterialPage()"
+          style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-family:inherit">
+      </div>
+      <div class="no-print" style="margin-bottom:12px">${catTabs}</div>
+      <div id="order-material-body"></div>
+      <div class="no-print" style="margin-top:16px;display:flex;justify-content:flex-end">
+        <button class="btn btn-primary" onclick="saveMaterialOrders()">💾 在庫を保存して発注数を確定</button>
+      </div>
     </div>`;
+  renderOrderMaterialBody();
+}
+
+function selectOrderCategory(cat) {
+  // タブ切替前に入力中の在庫を控えておく（保存前でも保持・再フェッチしない）
+  captureStockInputs();
+  materialOrderState.category = cat;
+  drawMaterialOrderPage();
+}
+
+// 画面上の在庫入力値を materialOrderState.saved に反映（タブ移動・再描画で消えないように）
+function captureStockInputs() {
+  document.querySelectorAll('.mo-stock').forEach(inp => {
+    const pid = +inp.dataset.pid;
+    const v = inp.value === '' ? undefined : (parseInt(inp.value)||0);
+    if (v === undefined) delete materialOrderState.saved[pid];
+    else materialOrderState.saved[pid] = v;
+  });
+}
+
+function renderOrderMaterialBody() {
+  const { category, products, suppliers, saved } = materialOrderState;
+  const inCat = products.filter(p => (p.category||'未分類') === category);
+  // 業者ごとにグループ化
+  const groups = {};
+  inCat.forEach(p => {
+    const key = p.supplier_id || 0;
+    (groups[key] = groups[key] || []).push(p);
+  });
+  const blocks = Object.keys(groups).map(sidKey => {
+    const s = suppliers[sidKey];
+    const head = s ? `
+      <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:baseline">
+        <span style="font-weight:700;font-size:15px">🚚 ${s.name}</span>
+        ${s.order_days?`<span style="font-size:12px;color:var(--text2)">発注: ${s.order_days}</span>`:''}
+        ${s.delivery_days?`<span style="font-size:12px;color:var(--text2)">納品: ${s.delivery_days}</span>`:''}
+        ${s.phone?`<span style="font-size:12px;color:var(--text2)">☎ ${s.phone}</span>`:''}
+        ${s.site_url?`<a href="${s.site_url}" target="_blank" rel="noopener" style="font-size:12px">サイト↗</a>`:''}
+      </div>` : `<span style="font-weight:700;font-size:15px;color:var(--text2)">業者未設定</span>`;
+    const rows = groups[sidKey].map(p => {
+      const stock = saved[p.id];
+      const stockVal = (stock===undefined||stock===null) ? '' : stock;
+      const oq = (stock===undefined||stock==='') ? '' : calcOrderQty(p.base_qty, stock, p.order_unit);
+      return `
+        <tr>
+          <td style="text-align:left">${p.name}</td>
+          <td style="text-align:center">${p.base_qty||0}</td>
+          <td style="text-align:center">${p.order_unit?p.order_unit:'―'}</td>
+          <td><input type="number" min="0" class="mo-stock" data-pid="${p.id}" data-base="${p.base_qty||0}" data-unit="${p.order_unit||0}"
+                value="${stockVal}" placeholder="0" oninput="onStockInput(this)"
+                style="width:72px;text-align:center"></td>
+          <td style="text-align:center;font-weight:700"><span class="mo-order" data-pid="${p.id}">${oq}</span></td>
+          <td style="text-align:right;color:var(--text2)">${p.price?('¥'+p.price.toLocaleString()):'―'}</td>
+        </tr>`;
+    }).join('');
+    return `
+      <div class="card mb-16">
+        <div class="card-header">${head}</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th style="text-align:left;min-width:140px">商品名</th>
+              <th style="min-width:56px">基準数</th>
+              <th style="min-width:48px">単位</th>
+              <th style="min-width:80px">在庫数</th>
+              <th style="min-width:70px">発注数</th>
+              <th style="min-width:70px">価格</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }).join('');
+  document.getElementById('order-material-body').innerHTML =
+    blocks || '<div class="text-muted text-center" style="padding:24px">このカテゴリの発注商品はありません</div>';
+}
+
+function onStockInput(inp) {
+  const base = +inp.dataset.base, unit = +inp.dataset.unit;
+  const stock = inp.value === '' ? '' : (parseInt(inp.value)||0);
+  const span = document.querySelector(`.mo-order[data-pid="${inp.dataset.pid}"]`);
+  if (span) span.textContent = (stock==='') ? '' : calcOrderQty(base, stock, unit);
+}
+
+async function saveMaterialOrders() {
+  captureStockInputs();
+  const items = Object.entries(materialOrderState.saved)
+    .map(([pid, stock]) => ({order_product_id:+pid, stock_qty:stock}));
+  const r = await fetch(`${API}/material-orders/bulk`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({date: materialOrderState.date, items})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) showToast(`${r.count}件保存しました`);
+  else showToast('保存失敗', true);
 }
 
 // ═══════════════════════════════════════════════
@@ -2601,6 +2758,188 @@ async function deleteChannel(id, name) {
     cachedChannels = await fetch(API+'/channels').then(r=>r.json());
     renderChannelsPage();
   } else showToast('削除失敗', true);
+}
+
+// ═══════════════════════════════════════════════
+// 業者マスタ（原材料発注の発注先）
+// ═══════════════════════════════════════════════
+async function renderSuppliersPage() {
+  setLoading();
+  const suppliers = await fetch(`${API}/suppliers?include_inactive=1`).then(r=>r.json()).catch(()=>[]);
+  const rows = suppliers.map(s=>`
+    <tr>
+      <td><input type="text" value="${esc(s.name)}"          id="sup-n${s.id}" style="width:120px"></td>
+      <td><input type="text" value="${esc(s.order_days)}"    id="sup-o${s.id}" style="width:80px" placeholder="月,木"></td>
+      <td><input type="text" value="${esc(s.delivery_days)}" id="sup-d${s.id}" style="width:80px" placeholder="火,金"></td>
+      <td><input type="text" value="${esc(s.phone)}"         id="sup-p${s.id}" style="width:110px"></td>
+      <td><input type="text" value="${esc(s.site_url)}"      id="sup-u${s.id}" style="width:150px"></td>
+      <td style="text-align:center"><input type="checkbox" ${s.active?'checked':''} id="sup-a${s.id}"></td>
+      <td>
+        <button class="btn btn-primary btn-sm" onclick="updateSupplier(${s.id})">更新</button>
+        <button class="btn btn-secondary btn-sm" style="margin-left:4px;color:var(--danger)" onclick="deleteSupplier(${s.id},'${esc(s.name)}')">削除</button>
+      </td>
+    </tr>`).join('');
+  document.getElementById('content').innerHTML = `
+    <div class="card mb-16">
+      <div class="card-header">
+        <span class="card-title">業者マスタ</span>
+        <span class="text-muted" style="font-size:12px">${suppliers.length}件</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th style="text-align:left">業者名</th><th>発注曜日</th><th>納品曜日</th>
+            <th>電話番号</th><th>サイトURL</th><th>有効</th><th></th>
+          </tr></thead>
+          <tbody>${rows||'<tr><td colspan="7" class="text-muted text-center" style="padding:20px">登録なし</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">業者を追加</span></div>
+      <div class="card-body">
+        <div class="form-grid" style="grid-template-columns:repeat(5,1fr) auto;gap:10px;align-items:end">
+          <div class="form-group"><label>業者名 <span style="color:var(--danger)">*</span></label><input type="text" id="new-sup-n" placeholder="○○食品"></div>
+          <div class="form-group"><label>発注曜日</label><input type="text" id="new-sup-o" placeholder="月,木"></div>
+          <div class="form-group"><label>納品曜日</label><input type="text" id="new-sup-d" placeholder="火,金"></div>
+          <div class="form-group"><label>電話番号</label><input type="text" id="new-sup-p"></div>
+          <div class="form-group"><label>サイトURL</label><input type="text" id="new-sup-u"></div>
+          <button class="btn btn-primary" onclick="addSupplier()">＋ 追加</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function supplierForm(prefix, id) {
+  const g = k => document.getElementById(`${prefix}${k}${id||''}`);
+  return {
+    name: g('-n').value.trim(),
+    order_days: g('-o').value.trim(),
+    delivery_days: g('-d').value.trim(),
+    phone: g('-p').value.trim(),
+    site_url: g('-u').value.trim(),
+  };
+}
+
+async function addSupplier() {
+  const body = supplierForm('new-sup');
+  if (!body.name) { showToast('業者名を入力してください', true); return; }
+  const r = await fetch(`${API}/suppliers`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('追加しました'); renderSuppliersPage(); }
+  else showToast(r?.error||'追加失敗', true);
+}
+
+async function updateSupplier(id) {
+  const body = supplierForm('sup', id);
+  if (!body.name) { showToast('業者名を入力してください', true); return; }
+  body.active = document.getElementById('sup-a'+id).checked ? 1 : 0;
+  const r = await fetch(`${API}/suppliers/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) showToast('更新しました'); else showToast(r?.error||'更新失敗', true);
+}
+
+async function deleteSupplier(id, name) {
+  if (!confirm(`「${name}」を削除しますか？\nこの業者を使う発注商品は業者未設定になります。`)) return;
+  const r = await fetch(`${API}/suppliers/${id}`, {method:'DELETE'}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('削除しました'); renderSuppliersPage(); } else showToast('削除失敗', true);
+}
+
+// ═══════════════════════════════════════════════
+// 発注商品マスタ
+// ═══════════════════════════════════════════════
+async function renderOrderProductsPage() {
+  setLoading();
+  const [products, suppliers] = await Promise.all([
+    fetch(`${API}/order-products?include_inactive=1`).then(r=>r.json()).catch(()=>[]),
+    fetch(`${API}/suppliers`).then(r=>r.json()).catch(()=>[]),
+  ]);
+  const supOptions = (sel) => `<option value="">（未設定）</option>` +
+    suppliers.map(s=>`<option value="${s.id}" ${sel==s.id?'selected':''}>${esc(s.name)}</option>`).join('');
+  const rows = products.map(p=>`
+    <tr>
+      <td><input type="text"   value="${esc(p.name)}"     id="op-n${p.id}" style="width:130px"></td>
+      <td><input type="text"   value="${esc(p.category)}" id="op-c${p.id}" style="width:90px" placeholder="肉"></td>
+      <td><select id="op-s${p.id}" style="width:120px">${supOptions(p.supplier_id)}</select></td>
+      <td><input type="number" value="${p.base_qty||0}"   id="op-b${p.id}" style="width:60px;text-align:center" min="0"></td>
+      <td><input type="number" value="${p.order_unit||0}" id="op-u${p.id}" style="width:60px;text-align:center" min="0"></td>
+      <td><input type="number" value="${p.price||0}"      id="op-p${p.id}" style="width:80px;text-align:center" min="0"></td>
+      <td style="text-align:center"><input type="checkbox" ${p.active?'checked':''} id="op-a${p.id}"></td>
+      <td>
+        <button class="btn btn-primary btn-sm" onclick="updateOrderProduct(${p.id})">更新</button>
+        <button class="btn btn-secondary btn-sm" style="margin-left:4px;color:var(--danger)" onclick="deleteOrderProduct(${p.id},'${esc(p.name)}')">削除</button>
+      </td>
+    </tr>`).join('');
+  document.getElementById('content').innerHTML = `
+    <div class="alert alert-warn no-print" style="margin-bottom:16px">
+      発注数 = 基準数 − 在庫数（0未満は0）。発注数単位を入れると一番近い倍数に四捨五入されます（0=単位なし）。
+    </div>
+    <div class="card mb-16">
+      <div class="card-header">
+        <span class="card-title">発注商品マスタ</span>
+        <span class="text-muted" style="font-size:12px">${products.length}件</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th style="text-align:left">商品名</th><th>カテゴリ</th><th>業者</th>
+            <th>基準数</th><th>発注数単位</th><th>価格</th><th>有効</th><th></th>
+          </tr></thead>
+          <tbody>${rows||'<tr><td colspan="8" class="text-muted text-center" style="padding:20px">登録なし</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">発注商品を追加</span></div>
+      <div class="card-body">
+        <div class="form-grid" style="grid-template-columns:repeat(6,1fr) auto;gap:10px;align-items:end">
+          <div class="form-group"><label>商品名 <span style="color:var(--danger)">*</span></label><input type="text" id="new-op-n"></div>
+          <div class="form-group"><label>カテゴリ</label><input type="text" id="new-op-c" placeholder="肉"></div>
+          <div class="form-group"><label>業者</label><select id="new-op-s">${supOptions('')}</select></div>
+          <div class="form-group"><label>基準数</label><input type="number" id="new-op-b" value="0" min="0"></div>
+          <div class="form-group"><label>発注数単位</label><input type="number" id="new-op-u" value="0" min="0"></div>
+          <div class="form-group"><label>価格</label><input type="number" id="new-op-p" value="0" min="0"></div>
+          <button class="btn btn-primary" onclick="addOrderProduct()">＋ 追加</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function orderProductForm(prefix, id) {
+  const g = k => document.getElementById(`${prefix}${k}${id||''}`);
+  const supVal = g('-s').value;
+  return {
+    name: g('-n').value.trim(),
+    category: g('-c').value.trim(),
+    supplier_id: supVal ? +supVal : null,
+    base_qty: parseInt(g('-b').value)||0,
+    order_unit: parseInt(g('-u').value)||0,
+    price: parseInt(g('-p').value)||0,
+  };
+}
+
+async function addOrderProduct() {
+  const body = orderProductForm('new-op');
+  if (!body.name) { showToast('商品名を入力してください', true); return; }
+  const r = await fetch(`${API}/order-products`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('追加しました'); renderOrderProductsPage(); }
+  else showToast(r?.error||'追加失敗', true);
+}
+
+async function updateOrderProduct(id) {
+  const body = orderProductForm('op', id);
+  if (!body.name) { showToast('商品名を入力してください', true); return; }
+  body.active = document.getElementById('op-a'+id).checked ? 1 : 0;
+  const r = await fetch(`${API}/order-products/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) showToast('更新しました'); else showToast(r?.error||'更新失敗', true);
+}
+
+async function deleteOrderProduct(id, name) {
+  if (!confirm(`「${name}」を削除しますか？\n過去の発注入力（在庫・発注数）も削除されます。`)) return;
+  const r = await fetch(`${API}/order-products/${id}`, {method:'DELETE'}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('削除しました'); renderOrderProductsPage(); } else showToast('削除失敗', true);
 }
 
 // ═══════════════════════════════════════════════
