@@ -209,6 +209,150 @@ def update_channel(cid):
     sb.table('hq_channels').update({'name':d['name'],'sort_order':d.get('sort_order',0),'active':d.get('active',1)}).eq('id',cid).eq('department_id',dept_id()).execute()
     return jsonify({'ok': True})
 
+# ─── 原材料発注：業者マスタ ───────────────────
+@app.route('/api/suppliers', methods=['GET'])
+def get_suppliers():
+    q = sb.table('hq_suppliers').select('*').eq('department_id',dept_id())
+    if request.args.get('include_inactive') != '1':
+        q = q.eq('active',1)
+    r = q.order('sort_order').order('id').execute()
+    return jsonify(r.data)
+
+@app.route('/api/suppliers', methods=['POST'])
+def add_supplier():
+    d = request.json or {}
+    name = (d.get('name') or '').strip()
+    if not name:
+        return jsonify({'ok': False, 'error': '業者名が空です'}), 400
+    did = dept_id()
+    r = sb.table('hq_suppliers').select('sort_order').eq('department_id',did).order('sort_order', desc=True).limit(1).execute()
+    max_order = r.data[0]['sort_order'] if r.data else 0
+    try:
+        sb.table('hq_suppliers').insert({
+            'name':name,'order_days':d.get('order_days',''),'delivery_days':d.get('delivery_days',''),
+            'phone':d.get('phone',''),'site_url':d.get('site_url',''),
+            'sort_order':max_order+1,'department_id':did
+        }).execute()
+    except Exception:
+        return jsonify({'ok': False, 'error': '同名の業者が既にあります'}), 400
+    return jsonify({'ok': True})
+
+@app.route('/api/suppliers/<int:sid>', methods=['PUT'])
+def update_supplier(sid):
+    d = request.json or {}
+    name = (d.get('name') or '').strip()
+    if not name:
+        return jsonify({'ok': False, 'error': '業者名が空です'}), 400
+    sb.table('hq_suppliers').update({
+        'name':name,'order_days':d.get('order_days',''),'delivery_days':d.get('delivery_days',''),
+        'phone':d.get('phone',''),'site_url':d.get('site_url',''),
+        'sort_order':d.get('sort_order',0),'active':d.get('active',1)
+    }).eq('id',sid).eq('department_id',dept_id()).execute()
+    return jsonify({'ok': True})
+
+@app.route('/api/suppliers/<int:sid>', methods=['DELETE'])
+def delete_supplier(sid):
+    did = dept_id()
+    # 使用中の発注商品があれば業者参照を外す（ON DELETE SET NULL 相当を明示）
+    sb.table('hq_order_products').update({'supplier_id':None}).eq('supplier_id',sid).eq('department_id',did).execute()
+    sb.table('hq_suppliers').delete().eq('id',sid).eq('department_id',did).execute()
+    return jsonify({'ok': True})
+
+# ─── 原材料発注：発注商品マスタ ───────────────
+def calc_order_qty(base_qty, stock_qty, order_unit):
+    """発注数 = 基準数 - 在庫数（0未満は0）。発注数単位があれば一番近い倍数に四捨五入。"""
+    need = (base_qty or 0) - (stock_qty or 0)
+    if need <= 0:
+        return 0
+    unit = order_unit or 0
+    if unit > 0:
+        return int(math.floor(need / unit + 0.5)) * unit
+    return int(need)
+
+@app.route('/api/order-products', methods=['GET'])
+def get_order_products():
+    q = sb.table('hq_order_products').select('*').eq('department_id',dept_id())
+    if request.args.get('include_inactive') != '1':
+        q = q.eq('active',1)
+    cat = request.args.get('category')
+    if cat:
+        q = q.eq('category', cat)
+    r = q.order('category').order('sort_order').order('id').execute()
+    return jsonify(r.data)
+
+@app.route('/api/order-products', methods=['POST'])
+def add_order_product():
+    d = request.json or {}
+    name = (d.get('name') or '').strip()
+    if not name:
+        return jsonify({'ok': False, 'error': '商品名が空です'}), 400
+    did = dept_id()
+    r = sb.table('hq_order_products').select('sort_order').eq('department_id',did).order('sort_order', desc=True).limit(1).execute()
+    max_order = r.data[0]['sort_order'] if r.data else 0
+    try:
+        sb.table('hq_order_products').insert({
+            'name':name,'category':(d.get('category') or '').strip(),'price':d.get('price',0) or 0,
+            'supplier_id':d.get('supplier_id') or None,'base_qty':d.get('base_qty',0) or 0,
+            'order_unit':d.get('order_unit',0) or 0,'sort_order':max_order+1,'department_id':did
+        }).execute()
+    except Exception:
+        return jsonify({'ok': False, 'error': '同名の発注商品が既にあります'}), 400
+    return jsonify({'ok': True})
+
+@app.route('/api/order-products/<int:pid>', methods=['PUT'])
+def update_order_product(pid):
+    d = request.json or {}
+    name = (d.get('name') or '').strip()
+    if not name:
+        return jsonify({'ok': False, 'error': '商品名が空です'}), 400
+    sb.table('hq_order_products').update({
+        'name':name,'category':(d.get('category') or '').strip(),'price':d.get('price',0) or 0,
+        'supplier_id':d.get('supplier_id') or None,'base_qty':d.get('base_qty',0) or 0,
+        'order_unit':d.get('order_unit',0) or 0,'sort_order':d.get('sort_order',0),'active':d.get('active',1)
+    }).eq('id',pid).eq('department_id',dept_id()).execute()
+    return jsonify({'ok': True})
+
+@app.route('/api/order-products/<int:pid>', methods=['DELETE'])
+def delete_order_product(pid):
+    did = dept_id()
+    sb.table('hq_order_products').delete().eq('id',pid).eq('department_id',did).execute()
+    return jsonify({'ok': True})
+
+# ─── 原材料発注：在庫入力・発注数（日付ごと）──
+@app.route('/api/material-orders', methods=['GET'])
+def get_material_orders():
+    target_date = request.args.get('date')
+    r = sb.table('hq_material_orders').select('*').eq('department_id',dept_id()).eq('date',target_date).execute()
+    return jsonify(r.data)
+
+@app.route('/api/material-orders/bulk', methods=['POST'])
+def save_material_orders():
+    d = request.json or {}
+    target_date = d.get('date')
+    items = d.get('items', [])
+    did = dept_id()
+    if not target_date:
+        return jsonify({'ok': False, 'error': 'date が必要です'}), 400
+    # 発注数はサーバー側で再計算（基準数・単位はマスタを正とする）
+    pids = [it.get('order_product_id') for it in items if it.get('order_product_id')]
+    prods = {p['id']:p for p in sb.table('hq_order_products').select('id,base_qty,order_unit')
+             .eq('department_id',did).in_('id',pids).execute().data} if pids else {}
+    rows = []
+    for it in items:
+        pid = it.get('order_product_id')
+        if not pid or pid not in prods:
+            continue
+        stock = it.get('stock_qty', 0) or 0
+        p = prods[pid]
+        oq = calc_order_qty(p.get('base_qty'), stock, p.get('order_unit'))
+        rows.append({'date':target_date,'order_product_id':pid,'stock_qty':stock,
+                     'order_qty':oq,'department_id':did})
+    # その日の入力を入れ替え（送られてこなかった商品は削除＝未入力扱い）
+    sb.table('hq_material_orders').delete().eq('department_id',did).eq('date',target_date).execute()
+    if rows:
+        sb.table('hq_material_orders').insert(rows).execute()
+    return jsonify({'ok': True, 'count': len(rows)})
+
 # ─── カテゴリマスタ ───────────────────────────
 @app.route('/api/categories', methods=['GET'])
 def get_categories():
