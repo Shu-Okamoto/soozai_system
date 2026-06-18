@@ -2796,6 +2796,7 @@ async function renderChannelsPageExtended() {
       <td><input type="text" value="${esc(c.phone||'')}"   id="cph${c.id}" style="width:110px"></td>
       <td><input type="text" value="${esc(c.fax||'')}"     id="cfx${c.id}" style="width:110px"></td>
       <td><input type="text" value="${esc(c.email||'')}"   id="cem${c.id}" style="width:150px"></td>
+      <td><input type="text" value="${esc(c.zip||'')}"     id="czp${c.id}" style="width:80px"></td>
       <td><input type="text" value="${esc(c.address||'')}" id="cad${c.id}" style="width:200px"></td>
       <td><input type="number" value="${c.sort_order}"     id="cho${c.id}" style="width:54px;text-align:center" min="1"></td>
       <td style="white-space:nowrap">
@@ -2821,11 +2822,12 @@ async function renderChannelsPageExtended() {
             <th style="min-width:110px">電話番号</th>
             <th style="min-width:110px">FAX番号</th>
             <th style="min-width:150px">メール</th>
+            <th style="min-width:80px">郵便番号</th>
             <th style="min-width:200px">住所</th>
             <th style="min-width:54px">順</th>
             <th></th>
           </tr></thead>
-          <tbody>${rows||'<tr><td colspan="9" class="text-muted text-center" style="padding:20px">登録なし</td></tr>'}</tbody>
+          <tbody>${rows||'<tr><td colspan="10" class="text-muted text-center" style="padding:20px">登録なし</td></tr>'}</tbody>
         </table>
       </div>
     </div>
@@ -2839,6 +2841,7 @@ async function renderChannelsPageExtended() {
           <div class="form-group"><label>電話番号</label><input type="text" id="cphNew"></div>
           <div class="form-group"><label>FAX番号</label><input type="text" id="cfxNew"></div>
           <div class="form-group"><label>メール</label><input type="text" id="cemNew"></div>
+          <div class="form-group"><label>郵便番号</label><input type="text" id="czpNew" placeholder="123-4567"></div>
           <div class="form-group" style="grid-column:1/-1"><label>住所</label><input type="text" id="cadNew"></div>
         </div>
         <button class="btn btn-primary" style="margin-top:12px" onclick="addChannel()">＋ 追加</button>
@@ -2855,6 +2858,7 @@ function channelExtraFields(suffix) {
   if (g('cph'))  out.phone   = g('cph').value.trim();
   if (g('cfx'))  out.fax     = g('cfx').value.trim();
   if (g('cem'))  out.email   = g('cem').value.trim();
+  if (g('czp'))  out.zip     = g('czp').value.trim();
   if (g('cad'))  out.address = g('cad').value.trim();
   return out;
 }
