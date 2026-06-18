@@ -204,7 +204,7 @@ def add_channel():
     r = sb.table('hq_channels').select('sort_order').eq('department_id',did).order('sort_order', desc=True).limit(1).execute()
     max_order = r.data[0]['sort_order'] if r.data else 0
     row = {'name':d['name'],'sort_order':max_order+1,'department_id':did}
-    for f in ('address','phone','fax','ctype','contact','email'):
+    for f in ('zip','address','phone','fax','ctype','contact','email'):
         if f in d: row[f] = d[f]
     sb.table('hq_channels').insert(row).execute()
     return jsonify({'ok': True})
@@ -213,7 +213,7 @@ def add_channel():
 def update_channel(cid):
     d = request.json
     upd = {'name':d['name'],'sort_order':d.get('sort_order',0),'active':d.get('active',1)}
-    for f in ('address','phone','fax','ctype','contact','email'):
+    for f in ('zip','address','phone','fax','ctype','contact','email'):
         if f in d: upd[f] = d[f]
     sb.table('hq_channels').update(upd).eq('id',cid).eq('department_id',dept_id()).execute()
     return jsonify({'ok': True})

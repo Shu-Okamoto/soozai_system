@@ -340,6 +340,7 @@ ALTER TABLE hq_products ADD COLUMN IF NOT EXISTS prod_type TEXT DEFAULT 'manufac
 
 -- 出荷先の追加情報（漬物部で使用）: 住所・電話・FAX・分類・担当者・メール
 -- ctype（分類）: '商社' | '小売' | '生協' | '委託'
+ALTER TABLE hq_channels ADD COLUMN IF NOT EXISTS zip     TEXT DEFAULT '';
 ALTER TABLE hq_channels ADD COLUMN IF NOT EXISTS address TEXT DEFAULT '';
 ALTER TABLE hq_channels ADD COLUMN IF NOT EXISTS phone   TEXT DEFAULT '';
 ALTER TABLE hq_channels ADD COLUMN IF NOT EXISTS fax     TEXT DEFAULT '';
