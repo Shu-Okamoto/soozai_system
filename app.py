@@ -353,6 +353,166 @@ def save_material_orders():
         sb.table('hq_material_orders').insert(rows).execute()
     return jsonify({'ok': True, 'count': len(rows)})
 
+# ═══════════════════════════════════════════════
+# 漬物部：製造 → 在庫 → 出荷 → 請求  [Phase 4]
+# ═══════════════════════════════════════════════
+# ─── 製造・入庫（在庫を増やす）──────────────
+@app.route('/api/production', methods=['GET'])
+def get_production():
+    did = dept_id()
+    q = sb.table('hq_production').select('*').eq('department_id',did)
+    if request.args.get('date'):
+        q = q.eq('date', request.args['date'])
+    if request.args.get('kind'):
+        q = q.eq('kind', request.args['kind'])
+    return jsonify(q.order('id').execute().data)
+
+@app.route('/api/production/bulk', methods=['POST'])
+def save_production():
+    d = request.json or {}
+    did = dept_id()
+    target_date = d.get('date'); kind = d.get('kind','manufacture')
+    if not target_date:
+        return jsonify({'ok': False, 'error': 'date が必要です'}), 400
+    # 当該日・区分の入力を入れ替え（数量0は未入力扱いで削除）
+    sb.table('hq_production').delete().eq('department_id',did).eq('date',target_date).eq('kind',kind).execute()
+    rows = [{'department_id':did,'date':target_date,'kind':kind,
+             'product_id':it['product_id'],'qty':it.get('qty',0) or 0,'note':it.get('note','')}
+            for it in d.get('items',[]) if it.get('product_id') and (it.get('qty') or 0) != 0]
+    if rows:
+        sb.table('hq_production').insert(rows).execute()
+    return jsonify({'ok': True, 'count': len(rows)})
+
+# ─── 在庫（製造・入庫の累計 − 出荷済の累計）──
+@app.route('/api/inventory', methods=['GET'])
+def get_inventory():
+    did = dept_id()
+    prods = sb.table('hq_products').select('id,name,category').eq('department_id',did).eq('active',1).order('id').execute().data
+    prod_rows = sb.table('hq_production').select('product_id,qty').eq('department_id',did).execute().data
+    ship_rows = sb.table('hq_shipments').select('product_id,qty,status').eq('department_id',did).execute().data
+    in_map = {}
+    for r in prod_rows:
+        in_map[r['product_id']] = in_map.get(r['product_id'],0) + (r['qty'] or 0)
+    shipped, reserved = {}, {}
+    for s in ship_rows:
+        tgt = shipped if s['status'] == 'shipped' else reserved
+        tgt[s['product_id']] = tgt.get(s['product_id'],0) + (s['qty'] or 0)
+    out = []
+    for p in prods:
+        i = in_map.get(p['id'],0); sh = shipped.get(p['id'],0); rv = reserved.get(p['id'],0)
+        out.append({'product_id':p['id'],'name':p['name'],'category':p.get('category',''),
+                    'in_qty':i,'shipped_qty':sh,'on_hand':i-sh,'reserved':rv,'available':i-sh-rv})
+    return jsonify(out)
+
+# ─── 出荷先×商品の単価表 ─────────────────────
+@app.route('/api/product-prices', methods=['GET'])
+def get_product_prices():
+    did = dept_id()
+    q = sb.table('hq_product_prices').select('*').eq('department_id',did)
+    if request.args.get('channel_id'):
+        q = q.eq('channel_id', request.args['channel_id'])
+    return jsonify(q.execute().data)
+
+@app.route('/api/product-prices/bulk', methods=['POST'])
+def save_product_prices():
+    d = request.json or {}
+    did = dept_id(); ch = d.get('channel_id')
+    if not ch:
+        return jsonify({'ok': False, 'error': 'channel_id が必要です'}), 400
+    sb.table('hq_product_prices').delete().eq('department_id',did).eq('channel_id',ch).execute()
+    rows = [{'department_id':did,'channel_id':ch,'product_id':it['product_id'],'price':it.get('price',0) or 0}
+            for it in d.get('items',[]) if it.get('product_id') and (it.get('price') or 0) > 0]
+    if rows:
+        sb.table('hq_product_prices').insert(rows).execute()
+    return jsonify({'ok': True, 'count': len(rows)})
+
+def _price_for(did, channel_id, product_id):
+    r = sb.table('hq_product_prices').select('price').eq('department_id',did)\
+        .eq('channel_id',channel_id).eq('product_id',product_id).limit(1).execute().data
+    return r[0]['price'] if r else 0
+
+# ─── 出荷登録（登録 → 出荷確定の2段階）───────
+@app.route('/api/shipments', methods=['GET'])
+def get_shipments():
+    did = dept_id()
+    q = sb.table('hq_shipments').select('*').eq('department_id',did)
+    if request.args.get('from'):       q = q.gte('order_date', request.args['from'])
+    if request.args.get('to'):         q = q.lte('order_date', request.args['to'])
+    if request.args.get('status'):     q = q.eq('status', request.args['status'])
+    if request.args.get('channel_id'): q = q.eq('channel_id', request.args['channel_id'])
+    return jsonify(q.order('order_date', desc=True).order('id', desc=True).execute().data)
+
+@app.route('/api/shipments', methods=['POST'])
+def add_shipment():
+    d = request.json or {}; did = dept_id()
+    for f in ('order_date','channel_id','product_id'):
+        if not d.get(f):
+            return jsonify({'ok': False, 'error': f'{f} が必要です'}), 400
+    up = d.get('unit_price')
+    if up in (None, ''):
+        up = _price_for(did, d['channel_id'], d['product_id'])
+    sb.table('hq_shipments').insert({
+        'department_id':did,'order_date':d['order_date'],'channel_id':d['channel_id'],
+        'product_id':d['product_id'],'qty':d.get('qty',0) or 0,'unit_price':up or 0,
+        'status':'registered','note':d.get('note','')
+    }).execute()
+    return jsonify({'ok': True})
+
+@app.route('/api/shipments/<int:sid>', methods=['PUT'])
+def update_shipment(sid):
+    d = request.json or {}; did = dept_id()
+    upd = {f: d[f] for f in ('order_date','channel_id','product_id','qty','unit_price','note','status','shipped_date') if f in d}
+    if upd:
+        sb.table('hq_shipments').update(upd).eq('id',sid).eq('department_id',did).execute()
+    return jsonify({'ok': True})
+
+@app.route('/api/shipments/<int:sid>/ship', methods=['POST'])
+def ship_shipment(sid):
+    d = request.json or {}; did = dept_id()
+    shipped = d.get('shipped_date') or date.today().isoformat()
+    sb.table('hq_shipments').update({'status':'shipped','shipped_date':shipped})\
+        .eq('id',sid).eq('department_id',did).execute()
+    return jsonify({'ok': True})
+
+@app.route('/api/shipments/<int:sid>', methods=['DELETE'])
+def delete_shipment(sid):
+    sb.table('hq_shipments').delete().eq('id',sid).eq('department_id',dept_id()).execute()
+    return jsonify({'ok': True})
+
+# ─── 請求書（出荷先×月、軽減税率8%・税込）──
+@app.route('/api/invoices', methods=['GET'])
+def get_invoices():
+    did = dept_id()
+    month = request.args.get('month'); ch = request.args.get('channel_id')
+    if not month:
+        return jsonify({'ok': False, 'error': 'month が必要です'}), 400
+    y, m = map(int, month.split('-'))
+    last = calendar.monthrange(y, m)[1]
+    start, end = f'{month}-01', f'{month}-{last:02d}'
+    q = sb.table('hq_shipments').select('*').eq('department_id',did).eq('status','shipped')\
+        .gte('shipped_date',start).lte('shipped_date',end)
+    if ch:
+        q = q.eq('channel_id', ch)
+    ships = q.execute().data
+    prods = {p['id']:p['name'] for p in sb.table('hq_products').select('id,name').eq('department_id',did).execute().data}
+    chans = {c['id']:c['name'] for c in sb.table('hq_channels').select('id,name').eq('department_id',did).execute().data}
+    by = {}
+    for s in ships:
+        amt = (s['qty'] or 0) * (s['unit_price'] or 0)
+        by.setdefault(s['channel_id'], []).append({
+            'shipped_date':s['shipped_date'],'product_id':s['product_id'],
+            'product_name':prods.get(s['product_id'],''),'qty':s['qty'],
+            'unit_price':s['unit_price'],'amount':amt})
+    out = []
+    for cid, lines in by.items():
+        lines.sort(key=lambda x:(x['shipped_date'] or '', x['product_name']))
+        subtotal = sum(l['amount'] for l in lines)
+        tax = int(math.floor(subtotal * 0.08))
+        out.append({'channel_id':cid,'channel_name':chans.get(cid,''),'month':month,
+                    'lines':lines,'subtotal':subtotal,'tax':tax,'total':subtotal+tax})
+    out.sort(key=lambda x:x['channel_name'])
+    return jsonify(out)
+
 # ─── カテゴリマスタ ───────────────────────────
 @app.route('/api/categories', methods=['GET'])
 def get_categories():

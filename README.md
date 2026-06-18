@@ -109,7 +109,24 @@ python app.py
 - ⚙️ 商品マスタ（カテゴリ / サブカテゴリ / 単価 / 有効・無効）
 - 🏷 カテゴリマスタ
 - 🏪 出荷先マスタ（並び順可変）
+- 💴 単価表マスタ（出荷先×商品の販売単価・税抜／漬物部）
 - 👤 メンバーマスタ（時給）
+
+### 漬物部：製造 → 在庫 → 出荷 → 請求（`config.features.production`）
+製造と出荷にタイムラグがある漬物部向けの専用フロー。`features.production` を持つ部署でのみ
+表示され、弁当の売上フロー（出荷指示書／実績／日報／分析）は非表示になる。
+
+| 画面 | 用途 |
+|------|------|
+| 🏭 製造日報 | 日付ごとに製造数を入力＝在庫に加算。`自社製造` / `製造委託（納品）` の2区分をタブで切替 |
+| 📦 在庫 | 商品別に「入庫累計 − 出荷済」で在庫を表示。引当(未出荷の登録分)・引当可も表示 |
+| 🚚 出荷登録 | FAX受領時に出荷先・商品・数量で登録 →「出荷」ボタンで確定（確定時に在庫から減算）。単価は単価表から自動入力。在庫不足は警告のみ（登録は可能） |
+| 🧾 請求書 | 出荷先×月で出荷済を集計し、軽減税率8%・税込の請求書を画面表示・印刷（PDF化） |
+
+- 在庫＝`hq_production`(入庫) の累計 − `hq_shipments`(status=shipped) の累計。出荷確定でのみ在庫が減る。
+- 請求は `shipped_date` が対象月内の出荷済を集計（出荷登録時の `unit_price` をスナップショット保存）。
+- 関連テーブル: `hq_production` / `hq_product_prices` / `hq_shipments`。
+- 関連API: `GET/POST /api/production` `/bulk`、`GET /api/inventory`、`GET/POST /api/product-prices` `/bulk`、`GET/POST/PUT/DELETE /api/shipments` `/<id>/ship`、`GET /api/invoices`。
 
 ---
 
