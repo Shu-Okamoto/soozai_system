@@ -183,7 +183,7 @@ INSERT INTO hq_departments (id, code, name, sort_order, config) VALUES
  (2,'mochi','餅部',2,
    '{"monthly_fixed_cost":70000,"material_rate":0.5,"sales_split":{"west":"西店","south":"南店"},"dx_instore_only":["餅"],"features":{"dx_orders":true}}'::jsonb),
  (3,'tsukemono','漬物部',3,
-   '{"monthly_fixed_cost":70000,"material_rate":0.5,"sales_split":{},"features":{}}'::jsonb)
+   '{"monthly_fixed_cost":70000,"material_rate":0.5,"sales_split":{},"features":{"production":true}}'::jsonb)
 ON CONFLICT (id) DO NOTHING;
 -- 部署別の管理者PINは config.admin_pin に設定する（任意・サーバー側で検証）。例:
 --   UPDATE hq_departments SET config = config || '{"admin_pin":"0000"}'::jsonb WHERE code='mochi';
@@ -334,3 +334,61 @@ CREATE TABLE IF NOT EXISTS hq_material_orders (
     UNIQUE (department_id, date, order_product_id)
 );
 CREATE INDEX IF NOT EXISTS hq_material_orders_date_idx ON hq_material_orders (department_id, date);
+
+-- ════════════════════════════════════════════════════════════
+-- 漬物部：製造 → 在庫 → 出荷 → 請求  [Phase 4]
+-- 製造(自社)／製造委託(納品)で入庫した数が在庫となり、出荷登録→出荷確定で在庫が減る。
+-- 出荷先(hq_channels)×商品(hq_products)の単価表を持ち、月末締めで出荷先別に請求書を作成。
+-- すべて部署(department_id)でスコープ。再実行安全（idempotent）。
+-- ════════════════════════════════════════════════════════════
+-- 製造・入庫（在庫を増やすイベント）
+--   kind: 'manufacture'(自社製造) | 'consignment'(製造委託の納品入庫)
+CREATE TABLE IF NOT EXISTS hq_production (
+    id            BIGSERIAL PRIMARY KEY,
+    department_id BIGINT NOT NULL DEFAULT 1 REFERENCES hq_departments(id),
+    date          TEXT NOT NULL,
+    product_id    BIGINT NOT NULL REFERENCES hq_products(id) ON DELETE CASCADE,
+    qty           INTEGER DEFAULT 0,
+    kind          TEXT DEFAULT 'manufacture',
+    note          TEXT DEFAULT '',
+    updated_at    TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (department_id, date, product_id, kind)
+);
+CREATE INDEX IF NOT EXISTS hq_production_dept_date_idx ON hq_production (department_id, date);
+
+-- 出荷先×商品の単価表（販売単価・税抜）
+CREATE TABLE IF NOT EXISTS hq_product_prices (
+    id            BIGSERIAL PRIMARY KEY,
+    department_id BIGINT NOT NULL DEFAULT 1 REFERENCES hq_departments(id),
+    channel_id    BIGINT NOT NULL REFERENCES hq_channels(id) ON DELETE CASCADE,
+    product_id    BIGINT NOT NULL REFERENCES hq_products(id) ON DELETE CASCADE,
+    price         INTEGER DEFAULT 0,
+    updated_at    TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (department_id, channel_id, product_id)
+);
+CREATE INDEX IF NOT EXISTS hq_product_prices_ch_idx ON hq_product_prices (department_id, channel_id);
+
+-- 出荷登録（FAX受領で登録→出荷確定の2段階。出荷確定時に在庫から減算）
+--   status: 'registered'(登録済・未出荷) | 'shipped'(出荷済)
+--   unit_price は登録時点の単価をスナップショット（単価表の後日変更で過去が変わらない）
+CREATE TABLE IF NOT EXISTS hq_shipments (
+    id            BIGSERIAL PRIMARY KEY,
+    department_id BIGINT NOT NULL DEFAULT 1 REFERENCES hq_departments(id),
+    order_date    TEXT NOT NULL,          -- 出荷登録日（FAX受領日）
+    channel_id    BIGINT NOT NULL REFERENCES hq_channels(id),
+    product_id    BIGINT NOT NULL REFERENCES hq_products(id),
+    qty           INTEGER DEFAULT 0,
+    unit_price    INTEGER DEFAULT 0,
+    status        TEXT DEFAULT 'registered',
+    shipped_date  TEXT,                   -- 出荷確定日（請求の対象月はこの日で判定）
+    note          TEXT DEFAULT '',
+    updated_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS hq_shipments_order_idx   ON hq_shipments (department_id, order_date);
+CREATE INDEX IF NOT EXISTS hq_shipments_shipped_idx ON hq_shipments (department_id, shipped_date);
+
+-- 漬物部の機能フラグを有効化（製造日報／在庫／出荷登録／請求書／単価表マスタを表示）。
+-- 新規インストールは上の seed で、既存DBはこの UPDATE で反映（再実行安全）。
+UPDATE hq_departments
+   SET config = jsonb_set(config, '{features,production}', 'true'::jsonb)
+ WHERE code = 'tsukemono';

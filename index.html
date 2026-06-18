@@ -147,6 +147,13 @@
       <button class="nav-item"        onclick="showPage('order')"  id="nav-order">🛒 発注</button>
       <button class="nav-item"        onclick="showPage('checklist')" id="nav-checklist">✅ チェックリスト</button>
     </div>
+    <div class="nav-group" id="navgroup-pickles" style="display:none">
+      <div class="nav-label">製造・出荷</div>
+      <button class="nav-item" onclick="showPage('production')" id="nav-production">🏭 製造日報</button>
+      <button class="nav-item" onclick="showPage('inventory')"  id="nav-inventory">📦 在庫</button>
+      <button class="nav-item" onclick="showPage('shipments')"  id="nav-shipments">🚚 出荷登録</button>
+      <button class="nav-item admin-only" onclick="showPage('invoice')" id="nav-invoice">🧾 請求書</button>
+    </div>
     <div class="nav-group admin-only">
       <div class="nav-label">管理者業務</div>
       <button class="nav-item" onclick="showPage('adminplan')"   id="nav-adminplan">📋 出荷計画</button>
@@ -169,6 +176,7 @@
       <button class="nav-item" onclick="showPage('channels')"   id="nav-channels">🏪 出荷先マスタ</button>
       <button class="nav-item" onclick="showPage('orderproducts')" id="nav-orderproducts">🧾 発注商品マスタ</button>
       <button class="nav-item" onclick="showPage('suppliers')"  id="nav-suppliers">🚚 業者マスタ</button>
+      <button class="nav-item" onclick="showPage('pricelist')"  id="nav-pricelist">💴 単価表マスタ</button>
       <button class="nav-item" onclick="showPage('members')"    id="nav-members">👤 メンバーマスタ</button>
     </div>
     <div class="sidebar-bottom">
@@ -285,6 +293,17 @@ function applyDeptFeatures() {
     const el = document.getElementById('nav-' + page);
     if (el) el.style.display = feats[feat] ? '' : 'none';
   }
+  // 漬物部：製造→在庫→出荷→請求のフロー（feature: production）。
+  // この導線を持つ部署では、売上ベースの弁当フロー（出荷指示書/実績/日報/分析）は隠す。
+  const pickles = !!feats.production;
+  const pg = document.getElementById('navgroup-pickles');
+  if (pg) pg.style.display = pickles ? '' : 'none';
+  const pl = document.getElementById('nav-pricelist');
+  if (pl && !pickles) pl.style.display = 'none';   // 単価表は admin-only かつ production部署のみ
+  if (pickles) {
+    ['nav-plan','nav-actual','nav-report','nav-adminplan','nav-monthly','nav-yearly']
+      .forEach(id => { const e = document.getElementById(id); if (e) e.style.display = 'none'; });
+  }
   // 弁当部以外はサイドバーに部署名を表示（弁当部は従来表記のまま）
   const lbl = document.getElementById('dept-label');
   if (lbl && currentDeptObj && currentDept !== 'bento') lbl.textContent = 'みかわ ' + currentDeptObj.name;
@@ -382,6 +401,11 @@ async function initData() {
     ]);
   } catch(e) {
     showToast('APIサーバー未起動。python app.py を実行してください。', true);
+  }
+  // 漬物部（製造フロー）は弁当の出荷指示書/実績フローを使わないため製造日報を初期表示。
+  if (deptFeatures().production) {
+    showPage('production');
+    return;
   }
   // メンバーは当日の出荷予定から実績を初期生成して実績入力へ（＝「実績入力へ」を押した状態）。
   // 管理者は従来どおり出荷指示書を初期表示。
@@ -529,10 +553,11 @@ function showPage(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:'出荷先マスタ',orderproducts:'発注商品マスタ',suppliers:'業者マスタ',members:'メンバーマスタ',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成',import:'売上実績取込'};
+  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:'出荷先マスタ',orderproducts:'発注商品マスタ',suppliers:'業者マスタ',pricelist:'単価表マスタ',members:'メンバーマスタ',production:'製造日報',inventory:'在庫',shipments:'出荷登録',invoice:'請求書',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成',import:'売上実績取込'};
   document.getElementById('page-title').textContent = titles[page]||'';
   ({plan:renderPlanPage,actual:renderActualPage,report:renderReportPage,
-    menu:renderMenuPage,order:renderOrderPage,checklist:renderChecklistPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,orderproducts:renderOrderProductsPage,suppliers:renderSuppliersPage,members:renderMembersPage,
+    menu:renderMenuPage,order:renderOrderPage,checklist:renderChecklistPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,orderproducts:renderOrderProductsPage,suppliers:renderSuppliersPage,pricelist:renderPriceListPage,members:renderMembersPage,
+    production:renderProductionPage,inventory:renderInventoryPage,shipments:renderShipmentsPage,invoice:renderInvoicePage,
     adminplan:renderAdminPlanPage,adminmenu:renderAdminMenuPage,adminshifts:renderAdminShiftsPage,import:renderImportPage})[page]?.();
 }
 
@@ -2940,6 +2965,366 @@ async function deleteOrderProduct(id, name) {
   if (!confirm(`「${name}」を削除しますか？\n過去の発注入力（在庫・発注数）も削除されます。`)) return;
   const r = await fetch(`${API}/order-products/${id}`, {method:'DELETE'}).then(r=>r.json()).catch(()=>null);
   if (r?.ok) { showToast('削除しました'); renderOrderProductsPage(); } else showToast('削除失敗', true);
+}
+
+// ═══════════════════════════════════════════════
+// 漬物部：製造 → 在庫 → 出荷 → 請求
+// ═══════════════════════════════════════════════
+const PROD_KINDS = { manufacture:'自社製造', consignment:'製造委託（納品）' };
+let productionKind = 'manufacture';
+
+// ── 製造日報（自社製造／製造委託の入庫を登録＝在庫を増やす）──
+async function renderProductionPage() {
+  setLoading();
+  const date = currentDate;
+  const rows = await fetch(`${API}/production?date=${date}&kind=${productionKind}`).then(r=>r.json()).catch(()=>[]);
+  const qtyMap = {}; rows.forEach(r => qtyMap[r.product_id] = r.qty);
+  const products = (cachedProducts||[]).filter(p => p.active);
+
+  const kindTabs = Object.entries(PROD_KINDS).map(([k,label])=>`
+    <button onclick="productionKind='${k}';renderProductionPage()"
+      class="btn btn-sm ${k===productionKind?'btn-primary':'btn-secondary'}" style="margin-right:6px">${label}</button>`).join('');
+
+  const body = products.map(p=>`
+    <tr>
+      <td style="text-align:left">${esc(p.name)}</td>
+      <td style="text-align:left;color:var(--text2)">${esc(p.category||'')}</td>
+      <td><input type="number" min="0" class="prod-qty" data-pid="${p.id}" value="${qtyMap[p.id]!=null?qtyMap[p.id]:''}"
+            placeholder="0" style="width:80px;text-align:center"></td>
+    </tr>`).join('');
+
+  document.getElementById('content').innerHTML = `
+    <div style="max-width:720px;margin:0 auto">
+      <div class="no-print" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+        <label style="font-size:13px;color:var(--text2)">製造日</label>
+        <input type="date" value="${date}" onchange="currentDate=this.value;document.getElementById('global-date').value=this.value;renderProductionPage()"
+          style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-family:inherit">
+      </div>
+      <div class="no-print" style="margin-bottom:12px">${kindTabs}</div>
+      <div class="alert alert-warn no-print" style="margin-bottom:12px">
+        入力した数量がそのまま在庫に加算されます（${PROD_KINDS[productionKind]}）。同じ日・同じ区分で保存すると上書きされます。
+      </div>
+      <div class="card mb-16">
+        <div class="card-header"><span class="card-title">${PROD_KINDS[productionKind]} — ${date}</span></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th style="text-align:left;min-width:160px">商品名</th><th style="text-align:left">カテゴリ</th><th style="min-width:90px">製造数</th></tr></thead>
+          <tbody>${body||'<tr><td colspan="3" class="text-muted text-center" style="padding:20px">商品マスタに商品がありません</td></tr>'}</tbody>
+        </table></div>
+      </div>
+      <div class="no-print" style="display:flex;justify-content:flex-end">
+        <button class="btn btn-primary" onclick="saveProduction()">💾 製造数を保存（在庫に反映）</button>
+      </div>
+    </div>`;
+}
+
+async function saveProduction() {
+  const items = [...document.querySelectorAll('.prod-qty')].map(inp=>({
+    product_id:+inp.dataset.pid, qty: inp.value===''?0:(parseInt(inp.value)||0)
+  }));
+  const r = await fetch(`${API}/production/bulk`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({date:currentDate, kind:productionKind, items})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) showToast(`${r.count}件保存しました`); else showToast('保存失敗', true);
+}
+
+// ── 在庫一覧（入庫累計 − 出荷済、引当・引当可も表示）──
+async function renderInventoryPage() {
+  setLoading();
+  const inv = await fetch(`${API}/inventory`).then(r=>r.json()).catch(()=>[]);
+  const rows = inv.map(r=>`
+    <tr>
+      <td style="text-align:left">${esc(r.name)}</td>
+      <td style="text-align:left;color:var(--text2)">${esc(r.category||'')}</td>
+      <td style="text-align:center">${fmt(r.in_qty)}</td>
+      <td style="text-align:center">${fmt(r.shipped_qty)}</td>
+      <td style="text-align:center;font-weight:700">${fmt(r.on_hand)}</td>
+      <td style="text-align:center;color:var(--text2)">${fmt(r.reserved)}</td>
+      <td style="text-align:center;font-weight:700;color:${r.available<0?'var(--danger)':'inherit'}">${fmt(r.available)}</td>
+    </tr>`).join('');
+  document.getElementById('content').innerHTML = `
+    <div style="max-width:860px;margin:0 auto">
+      <div class="no-print" style="display:flex;justify-content:flex-end;margin-bottom:8px">
+        <button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 印刷</button>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">在庫一覧</span>
+          <span class="text-muted" style="font-size:12px">在庫＝入庫累計−出荷済／引当可＝在庫−未出荷の登録分</span></div>
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th style="text-align:left;min-width:160px">商品名</th><th style="text-align:left">カテゴリ</th>
+            <th>入庫</th><th>出荷済</th><th>在庫</th><th>引当(未出荷)</th><th>引当可</th>
+          </tr></thead>
+          <tbody>${rows||'<tr><td colspan="7" class="text-muted text-center" style="padding:20px">在庫データなし</td></tr>'}</tbody>
+        </table></div>
+      </div>
+    </div>`;
+}
+
+// ── 出荷登録（FAX受領で登録 → 出荷ボタンで確定）──
+let shipmentPriceMap = {};   // 選択中の出荷先の {product_id: price}
+let inventoryAvailMap = {};  // {product_id: available}
+
+async function renderShipmentsPage() {
+  setLoading();
+  const month = currentDate.slice(0,7);
+  const last = new Date(+month.slice(0,4), +month.slice(5,7), 0).getDate();
+  const [ships, inv] = await Promise.all([
+    fetch(`${API}/shipments?from=${month}-01&to=${month}-${String(last).padStart(2,'0')}`).then(r=>r.json()).catch(()=>[]),
+    fetch(`${API}/inventory`).then(r=>r.json()).catch(()=>[]),
+  ]);
+  inventoryAvailMap = {}; inv.forEach(r => inventoryAvailMap[r.product_id] = r.available);
+  const prodName = {}; (cachedProducts||[]).forEach(p=>prodName[p.id]=p.name);
+  const chName = {}; (cachedChannels||[]).forEach(c=>chName[c.id]=c.name);
+
+  const chOpts = (cachedChannels||[]).filter(c=>c.active).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  const prOpts = (cachedProducts||[]).filter(p=>p.active).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+
+  const list = ships.map(s=>{
+    const shipped = s.status==='shipped';
+    const amt = (s.qty||0)*(s.unit_price||0);
+    return `<tr style="${shipped?'':'background:rgba(255,193,7,.06)'}">
+      <td style="text-align:center;white-space:nowrap">${s.order_date?.slice(5)||''}</td>
+      <td style="text-align:left">${esc(chName[s.channel_id]||'')}</td>
+      <td style="text-align:left">${esc(prodName[s.product_id]||'')}</td>
+      <td style="text-align:center">${fmt(s.qty)}</td>
+      <td style="text-align:right">¥${fmt(s.unit_price)}</td>
+      <td style="text-align:right">¥${fmt(amt)}</td>
+      <td style="text-align:center">${shipped
+        ? `<span style="color:var(--success,#2e7d32);font-weight:700">出荷済</span><br><span style="font-size:11px;color:var(--text2)">${s.shipped_date?.slice(5)||''}</span>`
+        : '<span style="color:#b8860b;font-weight:700">登録済</span>'}</td>
+      <td class="no-print" style="white-space:nowrap">
+        ${shipped ? '' : `<button class="btn btn-primary btn-sm" onclick="confirmShip(${s.id})">出荷</button>`}
+        <button class="btn btn-secondary btn-sm" style="margin-left:4px;color:var(--danger)" onclick="deleteShipment(${s.id})">削除</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('content').innerHTML = `
+    <div style="max-width:940px;margin:0 auto">
+      <div class="card mb-16 no-print">
+        <div class="card-header"><span class="card-title">出荷を登録</span></div>
+        <div class="card-body">
+          <div class="form-grid" style="grid-template-columns:auto 1fr 1fr auto auto auto;gap:10px;align-items:end">
+            <div class="form-group"><label>登録日</label><input type="date" id="sh-date" value="${currentDate}"></div>
+            <div class="form-group"><label>出荷先 <span style="color:var(--danger)">*</span></label>
+              <select id="sh-ch" onchange="onShipChannelChange()"><option value="">選択</option>${chOpts}</select></div>
+            <div class="form-group"><label>商品 <span style="color:var(--danger)">*</span></label>
+              <select id="sh-pr" onchange="onShipProductChange()"><option value="">選択</option>${prOpts}</select></div>
+            <div class="form-group"><label>数量</label><input type="number" id="sh-qty" min="0" value="0" style="width:80px" oninput="onShipQtyChange()"></div>
+            <div class="form-group"><label>単価</label><input type="number" id="sh-price" min="0" value="0" style="width:90px"></div>
+            <button class="btn btn-primary" onclick="addShipment()">＋ 登録</button>
+          </div>
+          <div id="sh-warn" style="margin-top:8px;font-size:13px;color:var(--danger)"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">${month} の出荷</span>
+          <span class="text-muted" style="font-size:12px">登録済は黄／出荷済で在庫減算。請求は出荷済が対象</span></div>
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>登録日</th><th style="text-align:left">出荷先</th><th style="text-align:left">商品</th>
+            <th>数量</th><th>単価</th><th>金額</th><th>状態</th><th class="no-print"></th>
+          </tr></thead>
+          <tbody>${list||'<tr><td colspan="8" class="text-muted text-center" style="padding:20px">この月の出荷はありません</td></tr>'}</tbody>
+        </table></div>
+      </div>
+    </div>`;
+}
+
+async function onShipChannelChange() {
+  const ch = document.getElementById('sh-ch').value;
+  shipmentPriceMap = {};
+  if (ch) {
+    const prices = await fetch(`${API}/product-prices?channel_id=${ch}`).then(r=>r.json()).catch(()=>[]);
+    prices.forEach(p => shipmentPriceMap[p.product_id] = p.price);
+  }
+  onShipProductChange();
+}
+
+function onShipProductChange() {
+  const pid = document.getElementById('sh-pr').value;
+  const priceInp = document.getElementById('sh-price');
+  if (pid && shipmentPriceMap[pid] != null) priceInp.value = shipmentPriceMap[pid];
+  onShipQtyChange();
+}
+
+function onShipQtyChange() {
+  const pid = document.getElementById('sh-pr').value;
+  const qty = parseInt(document.getElementById('sh-qty').value)||0;
+  const warn = document.getElementById('sh-warn');
+  if (pid && inventoryAvailMap[pid] != null && qty > inventoryAvailMap[pid]) {
+    warn.textContent = `⚠️ 在庫不足：引当可 ${fmt(inventoryAvailMap[pid])} に対して ${fmt(qty)} を出荷しようとしています（登録は可能です）`;
+  } else warn.textContent = '';
+}
+
+async function addShipment() {
+  const body = {
+    order_date: document.getElementById('sh-date').value,
+    channel_id: +document.getElementById('sh-ch').value || null,
+    product_id: +document.getElementById('sh-pr').value || null,
+    qty: parseInt(document.getElementById('sh-qty').value)||0,
+    unit_price: parseInt(document.getElementById('sh-price').value)||0,
+  };
+  if (!body.channel_id || !body.product_id) { showToast('出荷先と商品を選択してください', true); return; }
+  if (body.qty <= 0) { showToast('数量を入力してください', true); return; }
+  const r = await fetch(`${API}/shipments`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('登録しました'); renderShipmentsPage(); } else showToast(r?.error||'登録失敗', true);
+}
+
+async function confirmShip(id) {
+  const t = new Date();
+  const today = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+  const shipped = prompt('出荷日を入力してください（請求対象月の判定に使います）', today);
+  if (shipped === null) return;
+  const r = await fetch(`${API}/shipments/${id}/ship`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({shipped_date: shipped || today})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('出荷を確定しました'); renderShipmentsPage(); } else showToast('出荷失敗', true);
+}
+
+async function deleteShipment(id) {
+  if (!confirm('この出荷登録を削除しますか？')) return;
+  const r = await fetch(`${API}/shipments/${id}`, {method:'DELETE'}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('削除しました'); renderShipmentsPage(); } else showToast('削除失敗', true);
+}
+
+// ── 請求書（出荷先×月、出荷済を集計・軽減税率8%・税込）──
+async function renderInvoicePage() {
+  setLoading();
+  const month = currentDate.slice(0,7);
+  const chOpts = (cachedChannels||[]).filter(c=>c.active)
+    .map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  const invoices = await fetch(`${API}/invoices?month=${month}`).then(r=>r.json()).catch(()=>[]);
+  document.getElementById('content').innerHTML = `
+    <div style="max-width:760px;margin:0 auto">
+      <div class="no-print" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+        <label style="font-size:13px;color:var(--text2)">請求月</label>
+        <input type="month" id="inv-month" value="${month}" onchange="onInvoiceFilterChange(this.value)"
+          style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-family:inherit">
+        <label style="font-size:13px;color:var(--text2)">出荷先</label>
+        <select id="inv-ch" onchange="renderInvoiceList()"><option value="">すべて</option>${chOpts}</select>
+        <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="window.print()">🖨 印刷 / PDF</button>
+      </div>
+      <div id="invoice-list"></div>
+    </div>`;
+  window._invoiceCache = invoices;
+  renderInvoiceList();
+}
+
+function onInvoiceFilterChange(month) {
+  currentDate = month + '-01';
+  document.getElementById('global-date').value = currentDate;
+  renderInvoicePage();
+}
+
+function renderInvoiceList() {
+  const filterCh = document.getElementById('inv-ch')?.value;
+  const month = document.getElementById('inv-month')?.value || currentDate.slice(0,7);
+  let invoices = window._invoiceCache || [];
+  if (filterCh) invoices = invoices.filter(iv => String(iv.channel_id) === String(filterCh));
+  const today = new Date();
+  const issueDate = `${today.getFullYear()}年${today.getMonth()+1}月${today.getDate()}日`;
+  const [y,m] = month.split('-');
+  const el = document.getElementById('invoice-list');
+  if (!invoices.length) {
+    el.innerHTML = `<div class="text-muted text-center" style="padding:40px">${month} の出荷済データがありません。</div>`;
+    return;
+  }
+  el.innerHTML = invoices.map(iv=>{
+    const lines = iv.lines.map(l=>`
+      <tr>
+        <td style="text-align:center">${(l.shipped_date||'').slice(5)}</td>
+        <td style="text-align:left">${esc(l.product_name)}</td>
+        <td style="text-align:center">${fmt(l.qty)}</td>
+        <td style="text-align:right">¥${fmt(l.unit_price)}</td>
+        <td style="text-align:right">¥${fmt(l.amount)}</td>
+      </tr>`).join('');
+    return `
+      <div class="card mb-16 invoice-sheet">
+        <div class="card-body">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+            <div>
+              <h2 style="font-size:22px;font-weight:700;margin-bottom:8px">請求書</h2>
+              <div style="font-size:15px;font-weight:600">${esc(iv.channel_name)} 御中</div>
+              <div style="font-size:13px;color:var(--text2);margin-top:4px">${y}年${m}月分（月末締め）</div>
+            </div>
+            <div style="text-align:right;font-size:13px;color:var(--text2)">
+              <div>発行日：${issueDate}</div>
+              <div style="margin-top:6px;font-weight:600;color:var(--text)">みかわ 漬物部</div>
+            </div>
+          </div>
+          <div style="background:rgba(0,0,0,.04);border-radius:8px;padding:12px 16px;margin-bottom:16px">
+            <span style="font-size:13px;color:var(--text2)">ご請求金額（税込）</span>
+            <div style="font-size:26px;font-weight:700">¥${fmt(iv.total)}</div>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr>
+              <th>出荷日</th><th style="text-align:left">商品</th><th>数量</th><th>単価</th><th>金額</th>
+            </tr></thead>
+            <tbody>${lines}</tbody>
+            <tfoot>
+              <tr><td colspan="4" style="text-align:right">小計（税抜）</td><td style="text-align:right">¥${fmt(iv.subtotal)}</td></tr>
+              <tr><td colspan="4" style="text-align:right">消費税（軽減税率8%）</td><td style="text-align:right">¥${fmt(iv.tax)}</td></tr>
+              <tr><td colspan="4" style="text-align:right;font-weight:700">合計（税込）</td><td style="text-align:right;font-weight:700">¥${fmt(iv.total)}</td></tr>
+            </tfoot>
+          </table></div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ── 単価表マスタ（出荷先ごとの商品単価）──
+async function renderPriceListPage() {
+  setLoading();
+  const chOpts = (cachedChannels||[]).filter(c=>c.active)
+    .map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  document.getElementById('content').innerHTML = `
+    <div style="max-width:640px;margin:0 auto">
+      <div class="alert alert-warn no-print" style="margin-bottom:16px">
+        出荷先ごとの販売単価（税抜）を設定します。出荷登録時にこの単価が自動入力されます（登録後は各出荷に単価がスナップ保存されます）。
+      </div>
+      <div class="no-print" style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <label style="font-size:13px;color:var(--text2)">出荷先</label>
+        <select id="pl-ch" onchange="loadPriceList()"><option value="">選択してください</option>${chOpts}</select>
+      </div>
+      <div id="pricelist-body"></div>
+    </div>`;
+}
+
+async function loadPriceList() {
+  const ch = document.getElementById('pl-ch').value;
+  const body = document.getElementById('pricelist-body');
+  if (!ch) { body.innerHTML = ''; return; }
+  const prices = await fetch(`${API}/product-prices?channel_id=${ch}`).then(r=>r.json()).catch(()=>[]);
+  const priceMap = {}; prices.forEach(p=>priceMap[p.product_id]=p.price);
+  const rows = (cachedProducts||[]).filter(p=>p.active).map(p=>`
+    <tr>
+      <td style="text-align:left">${esc(p.name)}</td>
+      <td style="text-align:left;color:var(--text2)">${esc(p.category||'')}</td>
+      <td><input type="number" min="0" class="pl-price" data-pid="${p.id}"
+            value="${priceMap[p.id]!=null?priceMap[p.id]:''}" placeholder="―" style="width:100px;text-align:right"></td>
+    </tr>`).join('');
+  body.innerHTML = `
+    <div class="card">
+      <div class="card-header"><span class="card-title">単価設定</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th style="text-align:left;min-width:160px">商品名</th><th style="text-align:left">カテゴリ</th><th style="min-width:110px">単価(税抜)</th></tr></thead>
+        <tbody>${rows||'<tr><td colspan="3" class="text-muted text-center" style="padding:20px">商品なし</td></tr>'}</tbody>
+      </table></div>
+    </div>
+    <div class="no-print" style="display:flex;justify-content:flex-end;margin-top:12px">
+      <button class="btn btn-primary" onclick="savePriceList()">💾 単価を保存</button>
+    </div>`;
+}
+
+async function savePriceList() {
+  const ch = document.getElementById('pl-ch').value;
+  if (!ch) { showToast('出荷先を選択してください', true); return; }
+  const items = [...document.querySelectorAll('.pl-price')].map(inp=>({
+    product_id:+inp.dataset.pid, price: inp.value===''?0:(parseInt(inp.value)||0)
+  }));
+  const r = await fetch(`${API}/product-prices/bulk`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({channel_id:+ch, items})}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) showToast(`${r.count}件保存しました`); else showToast('保存失敗', true);
 }
 
 // ═══════════════════════════════════════════════
