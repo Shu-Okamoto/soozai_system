@@ -335,6 +335,9 @@ CREATE TABLE IF NOT EXISTS hq_material_orders (
 );
 CREATE INDEX IF NOT EXISTS hq_material_orders_date_idx ON hq_material_orders (department_id, date);
 
+-- 商品の製造区分（漬物部で使用）: 'manufacture'(自社製造) | 'consignment'(製造委託)
+ALTER TABLE hq_products ADD COLUMN IF NOT EXISTS prod_type TEXT DEFAULT 'manufacture';
+
 -- ════════════════════════════════════════════════════════════
 -- 漬物部：製造 → 在庫 → 出荷 → 請求  [Phase 4]
 -- 製造(自社)／製造委託(納品)で入庫した数が在庫となり、出荷登録→出荷確定で在庫が減る。

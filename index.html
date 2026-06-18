@@ -2413,6 +2413,12 @@ function buildProdRow(p) {
   const toggleBtn = isActive
     ? `<button class="btn btn-secondary btn-sm" style="margin-left:4px;color:var(--danger)" onclick="setProductActive(${p.id},0)">無効化</button>`
     : `<button class="btn btn-secondary btn-sm" style="margin-left:4px;color:#2E7D32" onclick="setProductActive(${p.id},1)">有効化</button>`;
+  const ptypeCell = deptFeatures().production
+    ? `<td><select id="ptype${p.id}" style="width:90px;font-size:12px">
+        <option value="manufacture"${p.prod_type!=='consignment'?' selected':''}>自社製造</option>
+        <option value="consignment"${p.prod_type==='consignment'?' selected':''}>製造委託</option>
+       </select></td>`
+    : '';
   return `<tr style="${rowStyle}">
     <td class="left"><input type="text" value="${p.name}" id="pn${p.id}" style="width:150px"></td>
     <td><input type="number" value="${p.price}" id="pp${p.id}" style="width:75px"></td>
@@ -2420,6 +2426,7 @@ function buildProdRow(p) {
       ${getCatOrder().map(c=>`<option${c===p.category?' selected':''}>${c}</option>`).join('')}
     </select></td>
     <td id="psc${p.id}">${subcatSel}</td>
+    ${ptypeCell}
     <td class="text-center">${statusBadge}</td>
     <td>
       <button class="btn btn-primary btn-sm" onclick="updateProduct(${p.id})">更新</button>
@@ -2434,23 +2441,25 @@ async function renderMasterPage() {
   const activeCount   = prods.filter(p=>p.active!==0).length;
   const inactiveCount = prods.length - activeCount;
 
+  const isPickles = !!deptFeatures().production;
+  const COLS = isPickles ? 7 : 6;
   const catOrder = getCatOrder();
   let rows = '';
   catOrder.forEach(cat => {
     const catProds = prods.filter(p=>p.category===cat);
     if (!catProds.length) return;
-    rows += `<tr><td colspan="6" class="fw-bold" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:4px 10px;text-align:left">▶ ${cat}</td></tr>`;
+    rows += `<tr><td colspan="${COLS}" class="fw-bold" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:4px 10px;text-align:left">▶ ${cat}</td></tr>`;
     const subcats = getSubcats(cat);
     if (subcats.length) {
       subcats.forEach(sub => {
         const subProds = catProds.filter(p=>p.subcategory===sub);
         if (!subProds.length) return;
-        rows += `<tr><td colspan="6" style="background:var(--surface2);font-size:11px;padding:3px 10px 3px 22px;color:var(--text2)">└ ${sub}</td></tr>`;
+        rows += `<tr><td colspan="${COLS}" style="background:var(--surface2);font-size:11px;padding:3px 10px 3px 22px;color:var(--text2)">└ ${sub}</td></tr>`;
         rows += subProds.map(p=>buildProdRow(p)).join('');
       });
       const noSub = catProds.filter(p=>!p.subcategory);
       if (noSub.length) {
-        rows += `<tr><td colspan="6" style="background:var(--surface2);font-size:11px;padding:3px 10px 3px 22px;color:var(--text2)">└ 未分類</td></tr>`;
+        rows += `<tr><td colspan="${COLS}" style="background:var(--surface2);font-size:11px;padding:3px 10px 3px 22px;color:var(--text2)">└ 未分類</td></tr>`;
         rows += noSub.map(p=>buildProdRow(p)).join('');
       }
     } else {
@@ -2471,6 +2480,7 @@ async function renderMasterPage() {
             <th style="min-width:80px">価格（円）</th>
             <th style="min-width:75px">分類</th>
             <th style="min-width:85px">惣菜種別</th>
+            ${isPickles?'<th style="min-width:90px">製造区分</th>':''}
             <th style="min-width:60px">状態</th>
             <th></th>
           </tr></thead>
@@ -2496,6 +2506,11 @@ async function renderMasterPage() {
               }).join('')}
             </select>
           </div>
+          ${isPickles?`<div class="form-group"><label>製造区分</label>
+            <select id="new-ptype">
+              <option value="manufacture">自社製造</option>
+              <option value="consignment">製造委託</option>
+            </select></div>`:''}
         </div>
         <button class="btn btn-primary" style="margin-top:12px" onclick="addProduct()">＋ 追加</button>
       </div>
@@ -2523,8 +2538,11 @@ async function updateProduct(id) {
   const price    = parseInt(document.getElementById('pp'+id).value)||0;
   const category = document.getElementById('pc'+id).value;
   const subcategory = document.getElementById('ps'+id)?.value || '';
+  const body = {name,price,category,subcategory,active:1};
+  const ptype = document.getElementById('ptype'+id);
+  if (ptype) body.prod_type = ptype.value;
   const r = await fetch(`${API}/products/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name,price,category,subcategory,active:1})}).then(r=>r.json()).catch(()=>null);
+    body:JSON.stringify(body)}).then(r=>r.json()).catch(()=>null);
   if (r?.ok) { showToast('更新しました'); cachedProducts=await fetch(API+'/products').then(r=>r.json()); }
   else showToast('更新失敗',true);
 }
@@ -2551,8 +2569,11 @@ async function addProduct() {
   if (!name)   { showToast('品名を入力してください',true); return; }
   if (!catVal) { showToast('分類・種別を選択してください',true); return; }
   const [category, subcategory] = catVal.split('|');
+  const body = {name,price,category,subcategory};
+  const ptype = document.getElementById('new-ptype');
+  if (ptype) body.prod_type = ptype.value;
   const r = await fetch(`${API}/products`,{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name,price,category,subcategory})}).then(r=>r.json()).catch(()=>null);
+    body:JSON.stringify(body)}).then(r=>r.json()).catch(()=>null);
   if (r?.ok) { showToast('追加しました'); cachedProducts=await fetch(API+'/products').then(r=>r.json()); renderMasterPage(); }
   else showToast('追加失敗',true);
 }
@@ -2991,8 +3012,11 @@ async function renderProductionPage() {
   const shiftMap = {}; shifts.forEach(s=>shiftMap[s.member_name]=s.hours);
   const products = (cachedProducts||[]).filter(p=>p.active);
   const members  = (cachedMembers||[]).filter(m=>m.active);
+  // 商品マスタの製造区分で振り分け（自社製造／製造委託）
+  const manuProds = products.filter(p=>p.prod_type!=='consignment');
+  const consProds = products.filter(p=>p.prod_type==='consignment');
 
-  const manuRows = products.map(p=>`
+  const manuRows = manuProds.map(p=>`
     <tr>
       <td style="text-align:left">${esc(p.name)}</td>
       <td style="text-align:right;color:var(--text2)">¥${fmt(p.price||0)}</td>
@@ -3000,7 +3024,7 @@ async function renderProductionPage() {
             value="${manuMap[p.id]!=null?manuMap[p.id]:''}" placeholder="0" style="width:74px;text-align:center" oninput="recalcProdReport()"></td>
       <td style="text-align:right"><span class="manu-amt" data-pid="${p.id}">¥0</span></td>
     </tr>`).join('');
-  const consRows = products.map(p=>`
+  const consRows = consProds.map(p=>`
     <tr>
       <td style="text-align:left">${esc(p.name)}</td>
       <td><input type="number" min="0" class="cons-qty" data-pid="${p.id}"
@@ -3027,7 +3051,7 @@ async function renderProductionPage() {
           <div class="card-header"><span class="card-title">自社製造（売上＝製造数×単価）</span></div>
           <div class="table-wrap"><table>
             <thead><tr><th style="text-align:left;min-width:120px">商品名</th><th>単価</th><th style="min-width:80px">製造数</th><th>製造高</th></tr></thead>
-            <tbody>${manuRows||'<tr><td colspan="4" class="text-muted text-center" style="padding:16px">商品なし</td></tr>'}</tbody>
+            <tbody>${manuRows||'<tr><td colspan="4" class="text-muted text-center" style="padding:16px">自社製造の商品がありません（商品マスタの製造区分で設定）</td></tr>'}</tbody>
           </table></div>
         </div>
         <div class="card">
@@ -3035,7 +3059,7 @@ async function renderProductionPage() {
             <span class="text-muted" style="font-size:12px">在庫のみ・売上対象外</span></div>
           <div class="table-wrap"><table>
             <thead><tr><th style="text-align:left;min-width:120px">商品名</th><th style="min-width:80px">入庫数</th></tr></thead>
-            <tbody>${consRows||'<tr><td colspan="2" class="text-muted text-center" style="padding:16px">商品なし</td></tr>'}</tbody>
+            <tbody>${consRows||'<tr><td colspan="2" class="text-muted text-center" style="padding:16px">製造委託の商品がありません（商品マスタの製造区分で設定）</td></tr>'}</tbody>
           </table></div>
         </div>
       </div>
