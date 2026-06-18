@@ -179,13 +179,16 @@ def get_products():
 @app.route('/api/products', methods=['POST'])
 def add_product():
     d = request.json
-    sb.table('hq_products').insert({'name':d['name'],'price':d['price'],'category':d['category'],'subcategory':d.get('subcategory',''),'department_id':dept_id()}).execute()
+    sb.table('hq_products').insert({'name':d['name'],'price':d['price'],'category':d['category'],'subcategory':d.get('subcategory',''),'prod_type':d.get('prod_type','manufacture'),'department_id':dept_id()}).execute()
     return jsonify({'ok': True})
 
 @app.route('/api/products/<int:pid>', methods=['PUT'])
 def update_product(pid):
     d = request.json
-    sb.table('hq_products').update({'name':d['name'],'price':d['price'],'category':d['category'],'subcategory':d.get('subcategory',''),'active':d.get('active',1)}).eq('id',pid).eq('department_id',dept_id()).execute()
+    upd = {'name':d['name'],'price':d['price'],'category':d['category'],'subcategory':d.get('subcategory',''),'active':d.get('active',1)}
+    if 'prod_type' in d:
+        upd['prod_type'] = d['prod_type']
+    sb.table('hq_products').update(upd).eq('id',pid).eq('department_id',dept_id()).execute()
     return jsonify({'ok': True})
 
 # ─── 出荷先マスタ ─────────────────────────────
