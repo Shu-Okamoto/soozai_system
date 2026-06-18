@@ -301,7 +301,9 @@ function applyDeptFeatures() {
   const pl = document.getElementById('nav-pricelist');
   if (pl && !pickles) pl.style.display = 'none';   // 単価表は admin-only かつ production部署のみ
   if (pickles) {
-    ['nav-plan','nav-actual','nav-report','nav-adminplan','nav-monthly','nav-yearly']
+    // 弁当の売上入力フロー（出荷指示書/実績/売上日報/出荷計画）は隠す。
+    // 月次・年次は残す（製造数ベースで集計して表示）。
+    ['nav-plan','nav-actual','nav-report','nav-adminplan']
       .forEach(id => { const e = document.getElementById(id); if (e) e.style.display = 'none'; });
   }
   // 弁当部以外はサイドバーに部署名を表示（弁当部は従来表記のまま）
@@ -2225,6 +2227,7 @@ async function saveChecklist(){
 // 月次サマリ
 // ═══════════════════════════════════════════════
 async function renderMonthlyPage() {
+  if (deptFeatures().production) return renderProdMonthlyPage();
   setLoading();
   const ym = currentDate.slice(0,7);
   const data = await fetch(`${API}/monthly-summary?month=${ym}`).then(r=>r.json()).catch(()=>null);
@@ -2310,6 +2313,7 @@ async function renderMonthlyPage() {
 // 年次サマリ
 // ═══════════════════════════════════════════════
 async function renderYearlyPage() {
+  if (deptFeatures().production) return renderProdYearlyPage();
   setLoading();
   const year = currentDate.slice(0,4);
   const data = await fetch(`${API}/yearly-summary?year=${year}`).then(r=>r.json()).catch(()=>null);
@@ -2970,60 +2974,223 @@ async function deleteOrderProduct(id, name) {
 // ═══════════════════════════════════════════════
 // 漬物部：製造 → 在庫 → 出荷 → 請求
 // ═══════════════════════════════════════════════
-const PROD_KINDS = { manufacture:'自社製造', consignment:'製造委託（納品）' };
-let productionKind = 'manufacture';
-
-// ── 製造日報（自社製造／製造委託の入庫を登録＝在庫を増やす）──
+// ── 製造日報：自社製造／委託入庫の数量＋時間数・天気を入力し、
+//    「確定」で在庫反映＋売上日報生成（製造高＝自社製造数×単価）。確定後も修正可。
 async function renderProductionPage() {
   setLoading();
   const date = currentDate;
-  const rows = await fetch(`${API}/production?date=${date}&kind=${productionKind}`).then(r=>r.json()).catch(()=>[]);
-  const qtyMap = {}; rows.forEach(r => qtyMap[r.product_id] = r.qty);
-  const products = (cachedProducts||[]).filter(p => p.active);
+  const [manu, cons, shifts, report] = await Promise.all([
+    fetch(`${API}/production?date=${date}&kind=manufacture`).then(r=>r.json()).catch(()=>[]),
+    fetch(`${API}/production?date=${date}&kind=consignment`).then(r=>r.json()).catch(()=>[]),
+    fetch(`${API}/shifts?date=${date}`).then(r=>r.json()).catch(()=>[]),
+    fetch(`${API}/daily-reports/${date}`).then(r=>r.json()).catch(()=>({})),
+  ]);
+  window._prodExpense = (report && report.expense != null) ? report.expense : null;  // 確定済みなら経費(営業日按分)を反映
+  const manuMap = {}; manu.forEach(r=>manuMap[r.product_id]=r.qty);
+  const consMap = {}; cons.forEach(r=>consMap[r.product_id]=r.qty);
+  const shiftMap = {}; shifts.forEach(s=>shiftMap[s.member_name]=s.hours);
+  const products = (cachedProducts||[]).filter(p=>p.active);
+  const members  = (cachedMembers||[]).filter(m=>m.active);
 
-  const kindTabs = Object.entries(PROD_KINDS).map(([k,label])=>`
-    <button onclick="productionKind='${k}';renderProductionPage()"
-      class="btn btn-sm ${k===productionKind?'btn-primary':'btn-secondary'}" style="margin-right:6px">${label}</button>`).join('');
-
-  const body = products.map(p=>`
+  const manuRows = products.map(p=>`
     <tr>
       <td style="text-align:left">${esc(p.name)}</td>
-      <td style="text-align:left;color:var(--text2)">${esc(p.category||'')}</td>
-      <td><input type="number" min="0" class="prod-qty" data-pid="${p.id}" value="${qtyMap[p.id]!=null?qtyMap[p.id]:''}"
-            placeholder="0" style="width:80px;text-align:center"></td>
+      <td style="text-align:right;color:var(--text2)">¥${fmt(p.price||0)}</td>
+      <td><input type="number" min="0" class="manu-qty" data-pid="${p.id}" data-price="${p.price||0}"
+            value="${manuMap[p.id]!=null?manuMap[p.id]:''}" placeholder="0" style="width:74px;text-align:center" oninput="recalcProdReport()"></td>
+      <td style="text-align:right"><span class="manu-amt" data-pid="${p.id}">¥0</span></td>
     </tr>`).join('');
+  const consRows = products.map(p=>`
+    <tr>
+      <td style="text-align:left">${esc(p.name)}</td>
+      <td><input type="number" min="0" class="cons-qty" data-pid="${p.id}"
+            value="${consMap[p.id]!=null?consMap[p.id]:''}" placeholder="0" style="width:74px;text-align:center"></td>
+    </tr>`).join('');
+  const memberInputs = members.map(m=>`
+    <div style="display:flex;align-items:center;gap:6px">
+      <span style="min-width:80px;font-size:13px">${esc(m.name)}</span>
+      <input type="number" min="0" max="24" step="0.5" class="prod-hours" data-name="${esc(m.name)}"
+        value="${shiftMap[m.name]!=null?shiftMap[m.name]:''}" placeholder="0" style="width:64px;text-align:center" oninput="recalcProdReport()">
+      <span style="font-size:12px;color:var(--text2)">時間</span>
+    </div>`).join('');
 
   document.getElementById('content').innerHTML = `
-    <div style="max-width:720px;margin:0 auto">
+    <div style="max-width:900px;margin:0 auto">
       <div class="no-print" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
         <label style="font-size:13px;color:var(--text2)">製造日</label>
         <input type="date" value="${date}" onchange="currentDate=this.value;document.getElementById('global-date').value=this.value;renderProductionPage()"
           style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-family:inherit">
+        ${report&&report.finalized_at?'<span style="font-size:12px;color:var(--text2)">（確定済・修正可）</span>':''}
       </div>
-      <div class="no-print" style="margin-bottom:12px">${kindTabs}</div>
-      <div class="alert alert-warn no-print" style="margin-bottom:12px">
-        入力した数量がそのまま在庫に加算されます（${PROD_KINDS[productionKind]}）。同じ日・同じ区分で保存すると上書きされます。
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start" class="prod-grid">
+        <div class="card">
+          <div class="card-header"><span class="card-title">自社製造（売上＝製造数×単価）</span></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th style="text-align:left;min-width:120px">商品名</th><th>単価</th><th style="min-width:80px">製造数</th><th>製造高</th></tr></thead>
+            <tbody>${manuRows||'<tr><td colspan="4" class="text-muted text-center" style="padding:16px">商品なし</td></tr>'}</tbody>
+          </table></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">製造委託（納品入庫）</span>
+            <span class="text-muted" style="font-size:12px">在庫のみ・売上対象外</span></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th style="text-align:left;min-width:120px">商品名</th><th style="min-width:80px">入庫数</th></tr></thead>
+            <tbody>${consRows||'<tr><td colspan="2" class="text-muted text-center" style="padding:16px">商品なし</td></tr>'}</tbody>
+          </table></div>
+        </div>
+      </div>
+      <div class="card mb-16" style="margin-top:16px">
+        <div class="card-header"><span class="card-title">日報入力</span></div>
+        <div class="card-body">
+          <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start">
+            <div>
+              <label style="font-size:13px;color:var(--text2)">天気</label><br>
+              <input type="text" id="prod-weather" value="${esc(report?.weather||'')}" placeholder="晴れ" style="width:120px">
+            </div>
+            <div style="flex:1;min-width:260px">
+              <label style="font-size:13px;color:var(--text2)">勤務時間（メンバー別）</label>
+              <div style="display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:6px">${memberInputs||'<span class="text-muted">メンバー未登録</span>'}</div>
+            </div>
+          </div>
+          <div style="margin-top:12px">
+            <label style="font-size:13px;color:var(--text2)">メモ</label><br>
+            <textarea id="prod-note" rows="2" style="width:100%;font-family:inherit" placeholder="">${esc(report?.note||'')}</textarea>
+          </div>
+        </div>
       </div>
       <div class="card mb-16">
-        <div class="card-header"><span class="card-title">${PROD_KINDS[productionKind]} — ${date}</span></div>
-        <div class="table-wrap"><table>
-          <thead><tr><th style="text-align:left;min-width:160px">商品名</th><th style="text-align:left">カテゴリ</th><th style="min-width:90px">製造数</th></tr></thead>
-          <tbody>${body||'<tr><td colspan="3" class="text-muted text-center" style="padding:20px">商品マスタに商品がありません</td></tr>'}</tbody>
-        </table></div>
+        <div class="card-header"><span class="card-title">売上日報（自動計算）</span></div>
+        <div class="card-body">
+          <div class="kpi-grid" id="prod-kpi" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))"></div>
+        </div>
       </div>
-      <div class="no-print" style="display:flex;justify-content:flex-end">
-        <button class="btn btn-primary" onclick="saveProduction()">💾 製造数を保存（在庫に反映）</button>
+      <div class="no-print" style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-primary" onclick="saveProductionReport()">✅ 確定（在庫反映＋売上日報生成）</button>
       </div>
+    </div>`;
+  recalcProdReport();
+}
+
+// 入力値からクライアント側で売上日報をプレビュー計算（確定時はサーバーが再計算）
+function recalcProdReport() {
+  const rate = (currentDeptObj?.config?.material_rate) ?? 0.5;
+  let sales = 0;
+  document.querySelectorAll('.manu-qty').forEach(inp=>{
+    const qty = parseInt(inp.value)||0, price = +inp.dataset.price||0;
+    const amt = qty*price;
+    const span = document.querySelector(`.manu-amt[data-pid="${inp.dataset.pid}"]`);
+    if (span) span.textContent = '¥'+fmt(amt);
+    sales += amt;
+  });
+  let hours = 0, labor = 0;
+  const wageMap = {}; (cachedMembers||[]).forEach(m=>wageMap[m.name]=m.hourly_wage||0);
+  document.querySelectorAll('.prod-hours').forEach(inp=>{
+    const h = parseFloat(inp.value)||0;
+    hours += h; labor += Math.round(h*(wageMap[inp.dataset.name]||0));
+  });
+  const material = Math.round(sales*rate);
+  const exp = window._prodExpense;                 // 確定済み＝サーバー計算の経費。未確定＝null
+  const hasExp = exp != null;
+  const profit = sales - material - labor - (hasExp ? exp : 0);
+  const kpi = document.getElementById('prod-kpi');
+  if (kpi) kpi.innerHTML = `
+    <div class="kpi"><div class="kpi-label">製造高（売上）</div><div class="kpi-value green">¥${fmt(sales)}</div></div>
+    <div class="kpi"><div class="kpi-label">材料費(${Math.round(rate*100)}%)</div><div class="kpi-value">¥${fmt(material)}</div></div>
+    <div class="kpi"><div class="kpi-label">人件費</div><div class="kpi-value">¥${fmt(labor)}</div></div>
+    <div class="kpi"><div class="kpi-label">経費</div><div class="kpi-value">${hasExp?'¥'+fmt(exp):'<span style=\"font-size:13px;color:var(--text2)\">確定で算出</span>'}</div></div>
+    <div class="kpi"><div class="kpi-label">総時間</div><div class="kpi-value">${hours}<span style="font-size:13px">h</span></div></div>
+    <div class="kpi"><div class="kpi-label">差引利益${hasExp?'':'(経費前)'}</div><div class="kpi-value ${profit>=0?'green':'red'}">¥${fmt(profit)}</div></div>`;
+}
+
+async function saveProductionReport() {
+  const date = currentDate;
+  const manuItems = [...document.querySelectorAll('.manu-qty')].map(i=>({product_id:+i.dataset.pid, qty:i.value===''?0:(parseInt(i.value)||0)}));
+  const consItems = [...document.querySelectorAll('.cons-qty')].map(i=>({product_id:+i.dataset.pid, qty:i.value===''?0:(parseInt(i.value)||0)}));
+  const shiftRows = [...document.querySelectorAll('.prod-hours')].map(i=>({member_name:i.dataset.name, hours:parseFloat(i.value)||0}));
+  const weather = document.getElementById('prod-weather').value;
+  const note = document.getElementById('prod-note').value;
+  try {
+    // 1) 製造・委託入庫を保存（＝在庫反映） 2) 勤務時間を保存 3) 売上日報を生成
+    await fetch(`${API}/production/bulk`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({date, kind:'manufacture', items:manuItems})});
+    await fetch(`${API}/production/bulk`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({date, kind:'consignment', items:consItems})});
+    await fetch(`${API}/shifts`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({date, shifts:shiftRows})});
+    // 天気・メモを先に保存（generate は既存メモを保持するため）
+    await fetch(`${API}/daily-info/${date}`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({weather, note})});
+    const r = await fetch(`${API}/daily-reports/${date}/generate`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({weather, note})}).then(r=>r.json());
+    if (r?.ok) { showToast('確定しました（在庫・売上日報に反映）'); renderProductionPage(); }
+    else showToast(r?.error==='finalized'?'確定済のため再生成できません':'確定失敗', true);
+  } catch(e) { showToast('確定失敗', true); }
+}
+
+// ── 製造数ベースの月次サマリ（漬物部）──
+async function renderProdMonthlyPage() {
+  setLoading();
+  const ym = currentDate.slice(0,7);
+  const data = await fetch(`${API}/production-summary?month=${ym}`).then(r=>r.json()).catch(()=>null);
+  const prodRows = (data?.products||[]).map(p=>`
+    <tr>
+      <td style="text-align:left">${esc(p.name)}</td>
+      <td style="text-align:left;color:var(--text2)">${esc(p.category||'')}</td>
+      <td style="text-align:center;font-weight:700">${fmt(p.qty)}</td>
+      <td style="text-align:right;color:var(--text2)">¥${fmt(p.price)}</td>
+      <td style="text-align:right">¥${fmt(p.amount)}</td>
+    </tr>`).join('');
+  document.getElementById('content').innerHTML = `
+    <div class="no-print" style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <input type="month" value="${ym}" onchange="currentDate=this.value+'-01';document.getElementById('global-date').value=currentDate;renderMonthlyPage()" style="font-size:13px">
+      <span style="font-size:13px;color:var(--text2)">製造数ベースの月次サマリ（自社製造）</span>
+      <div style="margin-left:auto"><button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 印刷</button></div>
+    </div>
+    <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+      <div class="kpi"><div class="kpi-label">合計製造数</div><div class="kpi-value">${fmt(data?.total_qty||0)}</div></div>
+      <div class="kpi"><div class="kpi-label">合計製造高</div><div class="kpi-value green">¥${fmt(data?.total_amount||0)}</div></div>
+      <div class="kpi"><div class="kpi-label">製造日数</div><div class="kpi-value">${(data?.days||[]).length}<span style="font-size:13px">日</span></div></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="card-header"><span class="card-title">商品別 製造数（${ym}）</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th style="text-align:left;min-width:160px">商品名</th><th style="text-align:left">カテゴリ</th><th>製造数</th><th>単価</th><th>製造高</th></tr></thead>
+        <tbody>${prodRows||'<tr><td colspan="5" class="text-muted text-center" style="padding:20px">製造データがありません</td></tr>'}</tbody>
+      </table></div>
     </div>`;
 }
 
-async function saveProduction() {
-  const items = [...document.querySelectorAll('.prod-qty')].map(inp=>({
-    product_id:+inp.dataset.pid, qty: inp.value===''?0:(parseInt(inp.value)||0)
-  }));
-  const r = await fetch(`${API}/production/bulk`, {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({date:currentDate, kind:productionKind, items})}).then(r=>r.json()).catch(()=>null);
-  if (r?.ok) showToast(`${r.count}件保存しました`); else showToast('保存失敗', true);
+// ── 製造数ベースの年次サマリ（漬物部）──
+async function renderProdYearlyPage() {
+  setLoading();
+  const year = currentDate.slice(0,4);
+  const data = await fetch(`${API}/production-summary?year=${year}`).then(r=>r.json()).catch(()=>null);
+  const months = data?.months || [];
+  const head = months.map(m=>`<th style="min-width:48px">${+m.slice(5)}月</th>`).join('');
+  const rows = (data?.products||[]).map(p=>`
+    <tr>
+      <td style="text-align:left">${esc(p.name)}</td>
+      ${months.map(m=>`<td style="text-align:center">${p.months[m]?fmt(p.months[m]):'―'}</td>`).join('')}
+      <td style="text-align:center;font-weight:700">${fmt(p.qty)}</td>
+    </tr>`).join('');
+  const totalRow = `<tr style="font-weight:700;border-top:2px solid var(--border)">
+      <td style="text-align:left">合計製造高</td>
+      ${months.map(m=>`<td style="text-align:center;font-size:11px">¥${fmt((data?.months_total||{})[m]||0)}</td>`).join('')}
+      <td style="text-align:center">¥${fmt(data?.total_amount||0)}</td>
+    </tr>`;
+  document.getElementById('content').innerHTML = `
+    <div class="no-print" style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <input type="number" min="2020" max="2099" value="${year}" onchange="currentDate=this.value+'-01-01';document.getElementById('global-date').value=currentDate;renderYearlyPage()" style="width:100px;font-size:13px">
+      <span style="font-size:13px;color:var(--text2)">製造数ベースの年次サマリ（自社製造）</span>
+      <div style="margin-left:auto"><button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 印刷</button></div>
+    </div>
+    <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+      <div class="kpi"><div class="kpi-label">年間製造数</div><div class="kpi-value">${fmt(data?.total_qty||0)}</div></div>
+      <div class="kpi"><div class="kpi-label">年間製造高</div><div class="kpi-value green">¥${fmt(data?.total_amount||0)}</div></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="card-header"><span class="card-title">商品別 月次製造数（${year}年）</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th style="text-align:left;min-width:140px">商品名</th>${head}<th>年計</th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="${months.length+2}" class="text-muted text-center" style="padding:20px">製造データがありません</td></tr>`}</tbody>
+        ${data?.products?.length?`<tfoot>${totalRow}</tfoot>`:''}
+      </table></div>
+    </div>`;
 }
 
 // ── 在庫一覧（入庫累計 − 出荷済、引当・引当可も表示）──
