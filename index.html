@@ -2725,7 +2725,10 @@ async function deleteSubcategory(id, name) {
 // ═══════════════════════════════════════════════
 // 出荷先マスタ
 // ═══════════════════════════════════════════════
+const CHANNEL_CTYPES = ['商社','小売','生協','委託'];
+
 async function renderChannelsPage() {
+  if (deptFeatures().production) return renderChannelsPageExtended();
   setLoading();
   const channels = await fetch(`${API}/channels`).then(r=>r.json()).catch(()=>[]);
 
@@ -2774,11 +2777,93 @@ async function renderChannelsPage() {
   `;
 }
 
+function ctypeSelect(idAttr, sel) {
+  return `<select id="${idAttr}" style="width:80px;font-size:12px">
+    <option value="">―</option>
+    ${CHANNEL_CTYPES.map(t=>`<option value="${t}"${sel===t?' selected':''}>${t}</option>`).join('')}
+  </select>`;
+}
+
+// 漬物部：出荷先マスタ（住所・電話・FAX・分類・担当者・メール付き）
+async function renderChannelsPageExtended() {
+  setLoading();
+  const channels = await fetch(`${API}/channels`).then(r=>r.json()).catch(()=>[]);
+  const rows = channels.map(c=>`
+    <tr>
+      <td><input type="text" value="${esc(c.name)}"    id="chn${c.id}" style="width:130px"></td>
+      <td>${ctypeSelect('cct'+c.id, c.ctype||'')}</td>
+      <td><input type="text" value="${esc(c.contact||'')}" id="ccn${c.id}" style="width:90px"></td>
+      <td><input type="text" value="${esc(c.phone||'')}"   id="cph${c.id}" style="width:110px"></td>
+      <td><input type="text" value="${esc(c.fax||'')}"     id="cfx${c.id}" style="width:110px"></td>
+      <td><input type="text" value="${esc(c.email||'')}"   id="cem${c.id}" style="width:150px"></td>
+      <td><input type="text" value="${esc(c.address||'')}" id="cad${c.id}" style="width:200px"></td>
+      <td><input type="number" value="${c.sort_order}"     id="cho${c.id}" style="width:54px;text-align:center" min="1"></td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-primary btn-sm" onclick="updateChannel(${c.id})">更新</button>
+        <button class="btn btn-secondary btn-sm" style="margin-left:4px;color:var(--danger)" onclick="deleteChannel(${c.id}, '${esc(c.name)}')">削除</button>
+      </td>
+    </tr>`).join('');
+  document.getElementById('content').innerHTML = `
+    <div class="alert alert-warn no-print" style="margin-bottom:16px">
+      ⚠️ 出荷先名は出荷登録・請求書の宛名に使われます。変更すると過去データとの紐付けが崩れる場合があります。
+    </div>
+    <div class="card mb-16">
+      <div class="card-header">
+        <span class="card-title">出荷先マスタ</span>
+        <span class="text-muted" style="font-size:12px">${channels.length}件　※表示順はソート順で決まります</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th style="text-align:left;min-width:130px">出荷先名</th>
+            <th style="min-width:80px">分類</th>
+            <th style="min-width:90px">担当者</th>
+            <th style="min-width:110px">電話番号</th>
+            <th style="min-width:110px">FAX番号</th>
+            <th style="min-width:150px">メール</th>
+            <th style="min-width:200px">住所</th>
+            <th style="min-width:54px">順</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${rows||'<tr><td colspan="9" class="text-muted text-center" style="padding:20px">登録なし</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">出荷先を追加</span></div>
+      <div class="card-body">
+        <div class="form-grid" style="grid-template-columns:repeat(3,1fr);gap:12px">
+          <div class="form-group"><label>出荷先名 <span style="color:var(--danger)">*</span></label><input type="text" id="new-chn" placeholder="○○商事"></div>
+          <div class="form-group"><label>分類</label>${ctypeSelect('cctNew','')}</div>
+          <div class="form-group"><label>担当者</label><input type="text" id="ccnNew"></div>
+          <div class="form-group"><label>電話番号</label><input type="text" id="cphNew"></div>
+          <div class="form-group"><label>FAX番号</label><input type="text" id="cfxNew"></div>
+          <div class="form-group"><label>メール</label><input type="text" id="cemNew"></div>
+          <div class="form-group" style="grid-column:1/-1"><label>住所</label><input type="text" id="cadNew"></div>
+        </div>
+        <button class="btn btn-primary" style="margin-top:12px" onclick="addChannel()">＋ 追加</button>
+      </div>
+    </div>
+  `;
+}
+
+function channelExtraFields(suffix) {
+  const g = id => document.getElementById(id+suffix);
+  const out = {};
+  if (g('cct'))  out.ctype   = g('cct').value;
+  if (g('ccn'))  out.contact = g('ccn').value.trim();
+  if (g('cph'))  out.phone   = g('cph').value.trim();
+  if (g('cfx'))  out.fax     = g('cfx').value.trim();
+  if (g('cem'))  out.email   = g('cem').value.trim();
+  if (g('cad'))  out.address = g('cad').value.trim();
+  return out;
+}
+
 async function addChannel() {
   const name = document.getElementById('new-chn').value.trim();
   if (!name) { showToast('出荷先名を入力してください', true); return; }
   const r = await fetch(`${API}/channels`, {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({name})}).then(r=>r.json()).catch(()=>null);
+    body: JSON.stringify({name, ...channelExtraFields('New')})}).then(r=>r.json()).catch(()=>null);
   if (r?.ok) {
     showToast('追加しました');
     cachedChannels = await fetch(API+'/channels').then(r=>r.json());
@@ -2791,7 +2876,7 @@ async function updateChannel(id) {
   const order = parseInt(document.getElementById('cho'+id).value) || 1;
   if (!name) { showToast('出荷先名を入力してください', true); return; }
   const r = await fetch(`${API}/channels/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({name, sort_order: order, active: 1})}).then(r=>r.json()).catch(()=>null);
+    body: JSON.stringify({name, sort_order: order, active: 1, ...channelExtraFields(String(id))})}).then(r=>r.json()).catch(()=>null);
   if (r?.ok) {
     showToast('更新しました');
     cachedChannels = await fetch(API+'/channels').then(r=>r.json());
