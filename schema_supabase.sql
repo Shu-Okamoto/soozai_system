@@ -338,6 +338,15 @@ CREATE INDEX IF NOT EXISTS hq_material_orders_date_idx ON hq_material_orders (de
 -- 商品の製造区分（漬物部で使用）: 'manufacture'(自社製造) | 'consignment'(製造委託)
 ALTER TABLE hq_products ADD COLUMN IF NOT EXISTS prod_type TEXT DEFAULT 'manufacture';
 
+-- 出荷先の追加情報（漬物部で使用）: 住所・電話・FAX・分類・担当者・メール
+-- ctype（分類）: '商社' | '小売' | '生協' | '委託'
+ALTER TABLE hq_channels ADD COLUMN IF NOT EXISTS address TEXT DEFAULT '';
+ALTER TABLE hq_channels ADD COLUMN IF NOT EXISTS phone   TEXT DEFAULT '';
+ALTER TABLE hq_channels ADD COLUMN IF NOT EXISTS fax     TEXT DEFAULT '';
+ALTER TABLE hq_channels ADD COLUMN IF NOT EXISTS ctype   TEXT DEFAULT '';
+ALTER TABLE hq_channels ADD COLUMN IF NOT EXISTS contact TEXT DEFAULT '';
+ALTER TABLE hq_channels ADD COLUMN IF NOT EXISTS email   TEXT DEFAULT '';
+
 -- ════════════════════════════════════════════════════════════
 -- 漬物部：製造 → 在庫 → 出荷 → 請求  [Phase 4]
 -- 製造(自社)／製造委託(納品)で入庫した数が在庫となり、出荷登録→出荷確定で在庫が減る。
