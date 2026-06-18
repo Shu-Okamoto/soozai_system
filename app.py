@@ -513,6 +513,51 @@ def get_invoices():
     out.sort(key=lambda x:x['channel_name'])
     return jsonify(out)
 
+# ─── 製造数ベースの月次・年次サマリ（漬物部）──
+@app.route('/api/production-summary', methods=['GET'])
+def production_summary():
+    did = dept_id()
+    month = request.args.get('month'); year = request.args.get('year')
+    prods = {p['id']:p for p in sb.table('hq_products').select('id,name,category,price').eq('department_id',did).execute().data}
+    def price_of(pid): return (prods.get(pid,{}).get('price') or 0)
+    if month:
+        y, m = map(int, month.split('-')); last = calendar.monthrange(y, m)[1]
+        rows = sb.table('hq_production').select('date,product_id,qty').eq('department_id',did).eq('kind','manufacture')\
+            .gte('date',f'{month}-01').lte('date',f'{month}-{last:02d}').execute().data
+        per = {}
+        for r in rows:
+            per[r['product_id']] = per.get(r['product_id'],0) + (r['qty'] or 0)
+        products, total_qty, total_val = [], 0, 0
+        for pid, qty in per.items():
+            p = prods.get(pid,{}); price = price_of(pid); val = qty*price
+            products.append({'product_id':pid,'name':p.get('name',''),'category':p.get('category',''),
+                             'qty':qty,'price':price,'amount':val})
+            total_qty += qty; total_val += val
+        products.sort(key=lambda x:(x['category'],x['name']))
+        daily = {}
+        for r in rows:
+            daily[r['date']] = daily.get(r['date'],0) + (r['qty'] or 0)*price_of(r['product_id'])
+        days = [{'date':k,'amount':daily[k]} for k in sorted(daily)]
+        return jsonify({'month':month,'products':products,'days':days,'total_qty':total_qty,'total_amount':total_val})
+    if year:
+        rows = sb.table('hq_production').select('date,product_id,qty').eq('department_id',did).eq('kind','manufacture')\
+            .gte('date',f'{year}-01-01').lte('date',f'{year}-12-31').execute().data
+        per, months_total, total_qty, total_val = {}, {}, 0, 0
+        for r in rows:
+            pid = r['product_id']; mo = r['date'][:7]; qty = r['qty'] or 0; price = price_of(pid)
+            per.setdefault(pid,{})[mo] = per.setdefault(pid,{}).get(mo,0) + qty
+            months_total[mo] = months_total.get(mo,0) + qty*price
+            total_qty += qty; total_val += qty*price
+        products = []
+        for pid, mm in per.items():
+            p = prods.get(pid,{}); price = price_of(pid); tot = sum(mm.values())
+            products.append({'product_id':pid,'name':p.get('name',''),'category':p.get('category',''),
+                             'price':price,'months':mm,'qty':tot,'amount':tot*price})
+        products.sort(key=lambda x:(x['category'],x['name']))
+        return jsonify({'year':year,'products':products,'months':[f'{year}-{i:02d}' for i in range(1,13)],
+                        'months_total':months_total,'total_qty':total_qty,'total_amount':total_val})
+    return jsonify({'error':'month or year required'}), 400
+
 # ─── カテゴリマスタ ───────────────────────────
 @app.route('/api/categories', methods=['GET'])
 def get_categories():
@@ -928,11 +973,41 @@ def copy_shifts_week():
     return jsonify({'ok': True, 'copied': len(rows)})
 
 # ─── 日報 ─────────────────────────────────────
+def _calc_production_report(target_date, did, cfg, expense_override=None):
+    """製造フロー部署（漬物部）の日報計算。
+    売上(製造高)＝自社製造(kind=manufacture)の数量×商品マスタ単価。
+    委託入庫(consignment)は在庫のみで売上には含めない。人件費はシフト×時給。"""
+    material_rate = cfg.get('material_rate', 0.5)
+    fixed_cost    = cfg.get('monthly_fixed_cost')
+    prod = sb.table('hq_production').select('product_id,qty')\
+        .eq('department_id',did).eq('date',target_date).eq('kind','manufacture').execute().data
+    pids = list({r['product_id'] for r in prod})
+    price_map = {}
+    if pids:
+        price_map = {p['id']: (p.get('price') or 0)
+                     for p in sb.table('hq_products').select('id,price').in_('id',pids).execute().data}
+    total = sum((r['qty'] or 0) * price_map.get(r['product_id'], 0) for r in prod)
+    shifts_data = sb.table('hq_shifts').select('hours,member_name').eq('department_id',did).eq('date',target_date).execute().data
+    total_hours = sum(s['hours'] for s in shifts_data)
+    wage_map   = {m['name']:m['hourly_wage'] for m in sb.table('hq_members').select('name,hourly_wage').execute().data}
+    labor_cost = sum(int(s['hours']*wage_map.get(s['member_name'],0)) for s in shifts_data)
+    material   = int(total * material_rate)
+    expense    = expense_override if expense_override is not None else daily_expense(target_date, fixed_cost)
+    profit     = total - material - labor_cost - expense
+    labor_prod = (total/total_hours) if total_hours>0 else 0
+    return {'date':target_date,'total_sales':total,'material_cost':material,'labor_cost':labor_cost,
+            'expense':expense,'profit':profit,'labor_productivity':round(labor_prod,1),
+            'total_hours':total_hours,'west_sales':0,'south_sales':0,'other_sales':total,
+            'separate_orders':0}
+
 def calc_daily_report(target_date, did, cfg, expense_override=None):
     # cfg（部署設定）で材料費率・固定費・特売チャネル名・各機能の有無を切り替える。
     # 餅部・漬物部は features 空・sales_split 空のため、店別内訳/別注/NPO/DX合算は行われない。
     cfg = cfg or {}
     feats = cfg.get('features') or {}
+    # 製造フロー部署（漬物部）は製造数×単価ベースで算出（出荷/NPO/別注/DXは使わない）
+    if feats.get('production'):
+        return _calc_production_report(target_date, did, cfg, expense_override)
     split = cfg.get('sales_split') or {}
     west_name     = split.get('west')
     south_name    = split.get('south')
@@ -1102,7 +1177,9 @@ def get_daily_report(date_str):
 
     # 過去日かつ未確定 → 即時確定（遅延確定）してから再読込
     # ただし以前確定→明示解除された日（snapshot 残存）は再確定しない（編集中扱い）
-    if date_str < today_jst().isoformat() and not (stored and stored.get('actuals_snapshot')):
+    # 製造フロー部署（漬物部）は「確定後も修正可」のため自動確定しない。
+    feats = (cfg.get('features') or {})
+    if (not feats.get('production')) and date_str < today_jst().isoformat() and not (stored and stored.get('actuals_snapshot')):
         finalize_report(date_str, did, cfg)
         return get_daily_report(date_str)
 
@@ -1157,6 +1234,9 @@ def finalize_pending():
     finalized = []
     for dp in depts:
         did = dp['id']; cfg = dp.get('config') or {}
+        # 製造フロー部署（漬物部）は「確定後も修正可」のため自動確定の対象外
+        if (cfg.get('features') or {}).get('production'):
+            continue
         rows = sb.table('hq_daily_reports').select('date').eq('department_id',did).lt('date',cutoff).is_('finalized_at','null').execute().data
         for r in rows:
             if finalize_report(r['date'], did, cfg):

@@ -118,15 +118,19 @@ python app.py
 
 | 画面 | 用途 |
 |------|------|
-| 🏭 製造日報 | 日付ごとに製造数を入力＝在庫に加算。`自社製造` / `製造委託（納品）` の2区分をタブで切替 |
+| 🏭 製造日報 | 自社製造数・委託入庫数・勤務時間(メンバー別)・天気・メモを入力し、「確定」で**在庫反映＋売上日報生成**。確定後も修正可（自動確定の対象外） |
 | 📦 在庫 | 商品別に「入庫累計 − 出荷済」で在庫を表示。引当(未出荷の登録分)・引当可も表示 |
 | 🚚 出荷登録 | FAX受領時に出荷先・商品・数量で登録 →「出荷」ボタンで確定（確定時に在庫から減算）。単価は単価表から自動入力。在庫不足は警告のみ（登録は可能） |
 | 🧾 請求書 | 出荷先×月で出荷済を集計し、軽減税率8%・税込の請求書を画面表示・印刷（PDF化） |
+| 📈 月次/年次サマリ | 製造数ベースで集計（商品別の製造数・製造高）。`features.production` の部署では売上ベースに代えてこちらを表示 |
 
+- 製造日報の **売上(製造高)＝自社製造数 × 商品マスタ単価**。委託入庫(`kind=consignment`)は在庫のみで売上対象外。
+  人件費＝勤務時間×時給、材料費＝売上×材料費率、経費＝月固定費の営業日按分。`hq_daily_reports` に保存（売上日報）。
+- `features.production` の部署は「確定後も修正可」のため、売上日報の**自動確定(cron/遅延)を行わない**。
 - 在庫＝`hq_production`(入庫) の累計 − `hq_shipments`(status=shipped) の累計。出荷確定でのみ在庫が減る。
 - 請求は `shipped_date` が対象月内の出荷済を集計（出荷登録時の `unit_price` をスナップショット保存）。
 - 関連テーブル: `hq_production` / `hq_product_prices` / `hq_shipments`。
-- 関連API: `GET/POST /api/production` `/bulk`、`GET /api/inventory`、`GET/POST /api/product-prices` `/bulk`、`GET/POST/PUT/DELETE /api/shipments` `/<id>/ship`、`GET /api/invoices`。
+- 関連API: `GET/POST /api/production` `/bulk`、`GET /api/inventory`、`GET/POST /api/product-prices` `/bulk`、`GET/POST/PUT/DELETE /api/shipments` `/<id>/ship`、`GET /api/invoices`、`GET /api/production-summary`（製造数ベース月次/年次）。製造日報の確定は `POST /api/production/bulk` ×2 → `POST /api/shifts` → `POST /api/daily-info/<date>` → `POST /api/daily-reports/<date>/generate`。
 
 ---
 
