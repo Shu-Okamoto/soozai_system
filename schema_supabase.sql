@@ -400,6 +400,25 @@ CREATE TABLE IF NOT EXISTS hq_shipments (
 CREATE INDEX IF NOT EXISTS hq_shipments_order_idx   ON hq_shipments (department_id, order_date);
 CREATE INDEX IF NOT EXISTS hq_shipments_shipped_idx ON hq_shipments (department_id, shipped_date);
 
+-- 納品先マスタ（請求先(hq_channels)に複数紐づく納品先。商社などで使用）
+CREATE TABLE IF NOT EXISTS hq_delivery_destinations (
+    id            BIGSERIAL PRIMARY KEY,
+    department_id BIGINT NOT NULL DEFAULT 1 REFERENCES hq_departments(id),
+    channel_id    BIGINT NOT NULL REFERENCES hq_channels(id) ON DELETE CASCADE,  -- 請求先
+    name          TEXT NOT NULL,            -- 納品先名
+    address       TEXT DEFAULT '',
+    sort_order    INTEGER DEFAULT 0,
+    active        INTEGER DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS hq_delivery_dest_ch_idx ON hq_delivery_destinations (department_id, channel_id);
+
+-- 出荷登録に「納品予定日」「納品先」を追加（再実行安全）。
+--   dest_id  : 納品先マスタの参照（単発入力時は NULL）
+--   dest_name: 納品先名のスナップショット（マスタ選択・単発入力どちらも保存。請求書表示に使用）
+ALTER TABLE hq_shipments ADD COLUMN IF NOT EXISTS delivery_date TEXT DEFAULT '';
+ALTER TABLE hq_shipments ADD COLUMN IF NOT EXISTS dest_id   BIGINT REFERENCES hq_delivery_destinations(id) ON DELETE SET NULL;
+ALTER TABLE hq_shipments ADD COLUMN IF NOT EXISTS dest_name TEXT DEFAULT '';
+
 -- 漬物部の機能フラグを有効化（製造日報／在庫／出荷登録／請求書／単価表マスタを表示）。
 -- 新規インストールは上の seed で、既存DBはこの UPDATE で反映（再実行安全）。
 UPDATE hq_departments

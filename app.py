@@ -435,6 +435,41 @@ def save_product_prices():
         sb.table('hq_product_prices').insert(rows).execute()
     return jsonify({'ok': True, 'count': len(rows)})
 
+# ─── 納品先マスタ（請求先に紐づく）──────────────
+@app.route('/api/delivery-destinations', methods=['GET'])
+def get_delivery_destinations():
+    did = dept_id()
+    q = sb.table('hq_delivery_destinations').select('*').eq('department_id',did)
+    if request.args.get('channel_id'):
+        q = q.eq('channel_id', request.args['channel_id'])
+    if request.args.get('include_inactive') != '1':
+        q = q.eq('active',1)
+    return jsonify(q.order('channel_id').order('sort_order').order('id').execute().data)
+
+@app.route('/api/delivery-destinations', methods=['POST'])
+def add_delivery_destination():
+    d = request.json or {}; did = dept_id()
+    if not d.get('channel_id') or not (d.get('name') or '').strip():
+        return jsonify({'ok': False, 'error': '請求先と納品先名が必要です'}), 400
+    sb.table('hq_delivery_destinations').insert({
+        'department_id':did,'channel_id':d['channel_id'],'name':d['name'].strip(),
+        'address':d.get('address','') or '','sort_order':d.get('sort_order',0) or 0
+    }).execute()
+    return jsonify({'ok': True})
+
+@app.route('/api/delivery-destinations/<int:ddid>', methods=['PUT'])
+def update_delivery_destination(ddid):
+    d = request.json or {}; did = dept_id()
+    upd = {f: d[f] for f in ('name','address','sort_order','active','channel_id') if f in d}
+    if upd:
+        sb.table('hq_delivery_destinations').update(upd).eq('id',ddid).eq('department_id',did).execute()
+    return jsonify({'ok': True})
+
+@app.route('/api/delivery-destinations/<int:ddid>', methods=['DELETE'])
+def delete_delivery_destination(ddid):
+    sb.table('hq_delivery_destinations').delete().eq('id',ddid).eq('department_id',dept_id()).execute()
+    return jsonify({'ok': True})
+
 def _price_for(did, channel_id, product_id):
     r = sb.table('hq_product_prices').select('price').eq('department_id',did)\
         .eq('channel_id',channel_id).eq('product_id',product_id).limit(1).execute().data
@@ -463,14 +498,42 @@ def add_shipment():
     sb.table('hq_shipments').insert({
         'department_id':did,'order_date':d['order_date'],'channel_id':d['channel_id'],
         'product_id':d['product_id'],'qty':d.get('qty',0) or 0,'unit_price':up or 0,
-        'status':'registered','note':d.get('note','')
+        'status':'registered','note':d.get('note',''),
+        'delivery_date':d.get('delivery_date','') or '','dest_id':d.get('dest_id') or None,
+        'dest_name':d.get('dest_name','') or ''
     }).execute()
     return jsonify({'ok': True})
+
+@app.route('/api/shipments/bulk', methods=['POST'])
+def add_shipments_bulk():
+    """1回の出荷登録で複数商品をまとめて登録する。
+    共通: order_date, delivery_date, channel_id, dest_id/dest_name。
+    items: [{product_id, qty, unit_price?}]。単価未指定は単価表から補完。"""
+    d = request.json or {}; did = dept_id()
+    if not d.get('order_date') or not d.get('channel_id'):
+        return jsonify({'ok': False, 'error': '登録日と請求先が必要です'}), 400
+    ch = d['channel_id']
+    rows = []
+    for it in d.get('items', []):
+        pid = it.get('product_id'); qty = it.get('qty', 0) or 0
+        if not pid or qty == 0:
+            continue
+        up = it.get('unit_price')
+        if up in (None, ''):
+            up = _price_for(did, ch, pid)
+        rows.append({'department_id':did,'order_date':d['order_date'],'channel_id':ch,
+                     'product_id':pid,'qty':qty,'unit_price':up or 0,'status':'registered',
+                     'note':d.get('note',''),'delivery_date':d.get('delivery_date','') or '',
+                     'dest_id':d.get('dest_id') or None,'dest_name':d.get('dest_name','') or ''})
+    if not rows:
+        return jsonify({'ok': False, 'error': '商品が選択されていません'}), 400
+    sb.table('hq_shipments').insert(rows).execute()
+    return jsonify({'ok': True, 'count': len(rows)})
 
 @app.route('/api/shipments/<int:sid>', methods=['PUT'])
 def update_shipment(sid):
     d = request.json or {}; did = dept_id()
-    upd = {f: d[f] for f in ('order_date','channel_id','product_id','qty','unit_price','note','status','shipped_date') if f in d}
+    upd = {f: d[f] for f in ('order_date','channel_id','product_id','qty','unit_price','note','status','shipped_date','delivery_date','dest_id','dest_name') if f in d}
     if upd:
         sb.table('hq_shipments').update(upd).eq('id',sid).eq('department_id',did).execute()
     return jsonify({'ok': True})
@@ -506,19 +569,25 @@ def get_invoices():
     prods = {p['id']:p['name'] for p in sb.table('hq_products').select('id,name').eq('department_id',did).execute().data}
     chans = {c['id']:c['name'] for c in sb.table('hq_channels').select('id,name').eq('department_id',did).execute().data}
     by = {}
+    has_dest = {}   # 請求先ごとに納品先が1件でもあるか
     for s in ships:
         amt = (s['qty'] or 0) * (s['unit_price'] or 0)
+        dest = s.get('dest_name') or ''
+        if dest:
+            has_dest[s['channel_id']] = True
         by.setdefault(s['channel_id'], []).append({
             'shipped_date':s['shipped_date'],'product_id':s['product_id'],
             'product_name':prods.get(s['product_id'],''),'qty':s['qty'],
-            'unit_price':s['unit_price'],'amount':amt})
+            'unit_price':s['unit_price'],'amount':amt,'dest_name':dest})
     out = []
     for cid, lines in by.items():
-        lines.sort(key=lambda x:(x['shipped_date'] or '', x['product_name']))
+        # 納品先 → 出荷日 → 商品名 の順に並べる
+        lines.sort(key=lambda x:(x['dest_name'], x['shipped_date'] or '', x['product_name']))
         subtotal = sum(l['amount'] for l in lines)
         tax = int(math.floor(subtotal * 0.08))
         out.append({'channel_id':cid,'channel_name':chans.get(cid,''),'month':month,
-                    'lines':lines,'subtotal':subtotal,'tax':tax,'total':subtotal+tax})
+                    'lines':lines,'subtotal':subtotal,'tax':tax,'total':subtotal+tax,
+                    'has_dest':bool(has_dest.get(cid))})
     out.sort(key=lambda x:x['channel_name'])
     return jsonify(out)
 
