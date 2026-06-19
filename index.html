@@ -3426,27 +3426,7 @@ async function renderShipmentsPage() {
 
   const chOpts = (cachedChannels||[]).filter(c=>c.active).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
 
-  const list = ships.map(s=>{
-    const shipped = s.status==='shipped';
-    const amt = (s.qty||0)*(s.unit_price||0);
-    return `<tr style="${shipped?'':'background:rgba(255,193,7,.06)'}">
-      <td style="text-align:center;white-space:nowrap">${s.order_date?.slice(5)||''}</td>
-      <td style="text-align:center;white-space:nowrap">${s.delivery_date?.slice(5)||'―'}</td>
-      <td style="text-align:left">${esc(chName[s.channel_id]||'')}</td>
-      <td style="text-align:left">${esc(s.dest_name||'―')}</td>
-      <td style="text-align:left">${esc(prodName[s.product_id]||'')}</td>
-      <td style="text-align:center">${fmt(s.qty)}</td>
-      <td style="text-align:right">¥${fmt(s.unit_price)}</td>
-      <td style="text-align:right">¥${fmt(amt)}</td>
-      <td style="text-align:center">${shipped
-        ? `<span style="color:var(--success,#2e7d32);font-weight:700">出荷済</span><br><span style="font-size:11px;color:var(--text2)">${s.shipped_date?.slice(5)||''}</span>`
-        : '<span style="color:#b8860b;font-weight:700">登録済</span>'}</td>
-      <td class="no-print" style="white-space:nowrap">
-        ${shipped ? '' : `<button class="btn btn-primary btn-sm" onclick="confirmShip(${s.id})">出荷</button>`}
-        <button class="btn btn-secondary btn-sm" style="margin-left:4px;color:var(--danger)" onclick="deleteShipment(${s.id})">削除</button>
-      </td>
-    </tr>`;
-  }).join('');
+  window._shipList = ships;
 
   document.getElementById('content').innerHTML = `
     <div style="max-width:1000px;margin:0 auto">
@@ -3475,19 +3455,86 @@ async function renderShipmentsPage() {
         </div>
       </div>
       <div class="card">
-        <div class="card-header"><span class="card-title">${month} の出荷</span>
-          <span class="text-muted" style="font-size:12px">登録済は黄／出荷済で在庫減算。請求は出荷済が対象</span></div>
+        <div class="card-header" style="flex-wrap:wrap;gap:8px">
+          <span class="card-title">${month} の出荷</span>
+          <div class="no-print" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span style="font-size:12px;color:var(--text2)">表示:</span>
+            <button class="btn btn-sm" id="shf-all"        onclick="setShipFilter('all')">すべて</button>
+            <button class="btn btn-sm" id="shf-registered" onclick="setShipFilter('registered')">登録済のみ</button>
+            <button class="btn btn-sm" id="shf-shipped"    onclick="setShipFilter('shipped')">出荷済のみ</button>
+            <span style="font-size:12px;color:var(--text2);margin-left:8px">並び:</span>
+            <button class="btn btn-sm" id="shs-delivery" onclick="setShipSort('delivery')">納品予定が近い順</button>
+            <button class="btn btn-sm" id="shs-order"    onclick="setShipSort('order')">登録日が新しい順</button>
+          </div>
+        </div>
         <div class="table-wrap"><table>
           <thead><tr>
             <th>登録日</th><th>納品予定</th><th style="text-align:left">請求先</th><th style="text-align:left">納品先</th><th style="text-align:left">商品</th>
             <th>数量</th><th>単価</th><th>金額</th><th>状態</th><th class="no-print"></th>
           </tr></thead>
-          <tbody>${list||'<tr><td colspan="10" class="text-muted text-center" style="padding:20px">この月の出荷はありません</td></tr>'}</tbody>
+          <tbody id="ship-list-body"></tbody>
         </table></div>
       </div>
     </div>`;
   shipmentPriceMap = {}; shipDestMap = {};
   addShipRow(); addShipRow();   // 初期2行
+  drawShipmentList();
+}
+
+let shipFilter = 'all';     // 'all' | 'registered' | 'shipped'
+let shipSort   = 'delivery';// 'delivery'(納品予定が近い順) | 'order'(登録日が新しい順)
+
+function setShipFilter(f) { shipFilter = f; drawShipmentList(); }
+function setShipSort(s)   { shipSort = s;   drawShipmentList(); }
+
+function drawShipmentList() {
+  const all = window._shipList || [];
+  const prodName = {}; (cachedProducts||[]).forEach(p=>prodName[p.id]=p.name);
+  const chName = {}; (cachedChannels||[]).forEach(c=>chName[c.id]=c.name);
+  // フィルタボタンの選択状態
+  [['shf-all','all'],['shf-registered','registered'],['shf-shipped','shipped']].forEach(([id,v])=>{
+    const b=document.getElementById(id); if(b) b.className='btn btn-sm '+(shipFilter===v?'btn-primary':'btn-secondary');});
+  [['shs-delivery','delivery'],['shs-order','order']].forEach(([id,v])=>{
+    const b=document.getElementById(id); if(b) b.className='btn btn-sm '+(shipSort===v?'btn-primary':'btn-secondary');});
+
+  let rows = all.filter(s => shipFilter==='all' ? true : s.status===shipFilter);
+  if (shipSort === 'delivery') {
+    // 納品予定日の昇順（近い順）。未設定は末尾。同日は登録日昇順。
+    rows.sort((a,b)=>{
+      const ad=a.delivery_date||'￿', bd=b.delivery_date||'￿';
+      if (ad!==bd) return ad<bd?-1:1;
+      return (a.order_date||'')<(b.order_date||'')?-1:1;
+    });
+  } else {
+    rows.sort((a,b)=>{
+      const ao=a.order_date||'', bo=b.order_date||'';
+      if (ao!==bo) return ao<bo?1:-1;     // 登録日 降順
+      return (b.id||0)-(a.id||0);
+    });
+  }
+  const body = rows.map(s=>{
+    const shipped = s.status==='shipped';
+    const amt = (s.qty||0)*(s.unit_price||0);
+    return `<tr style="${shipped?'':'background:rgba(255,193,7,.06)'}">
+      <td style="text-align:center;white-space:nowrap">${s.order_date?.slice(5)||''}</td>
+      <td style="text-align:center;white-space:nowrap">${s.delivery_date?.slice(5)||'―'}</td>
+      <td style="text-align:left">${esc(chName[s.channel_id]||'')}</td>
+      <td style="text-align:left">${esc(s.dest_name||'―')}</td>
+      <td style="text-align:left">${esc(prodName[s.product_id]||'')}</td>
+      <td style="text-align:center">${fmt(s.qty)}</td>
+      <td style="text-align:right">¥${fmt(s.unit_price)}</td>
+      <td style="text-align:right">¥${fmt(amt)}</td>
+      <td style="text-align:center">${shipped
+        ? `<span style="color:var(--success,#2e7d32);font-weight:700">出荷済</span><br><span style="font-size:11px;color:var(--text2)">${s.shipped_date?.slice(5)||''}</span>`
+        : '<span style="color:#b8860b;font-weight:700">登録済</span>'}</td>
+      <td class="no-print" style="white-space:nowrap">
+        ${shipped ? '' : `<button class="btn btn-primary btn-sm" onclick="confirmShip(${s.id})">出荷</button>`}
+        <button class="btn btn-secondary btn-sm" style="margin-left:4px;color:var(--danger)" onclick="deleteShipment(${s.id})">削除</button>
+      </td>
+    </tr>`;
+  }).join('');
+  const tb = document.getElementById('ship-list-body');
+  if (tb) tb.innerHTML = body || '<tr><td colspan="10" class="text-muted text-center" style="padding:20px">該当する出荷はありません</td></tr>';
 }
 
 function prodOptionsHtml(sel) {
