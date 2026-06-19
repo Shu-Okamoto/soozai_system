@@ -120,19 +120,20 @@ python app.py
 |------|------|
 | 🏭 製造日報 | 自社製造数・委託入庫数・勤務時間(メンバー別)・天気・メモを入力し、「確定」で**在庫反映＋売上日報生成**。確定後も修正可（自動確定の対象外）。商品は**商品マスタの製造区分(自社製造/製造委託)**で各表に振り分け |
 | 📦 在庫 | 商品別に「入庫累計 − 出荷済」で在庫を表示。引当(未出荷の登録分)・引当可も表示 |
-| 🚚 出荷登録 | FAX受領時に出荷先・商品・数量で登録 →「出荷」ボタンで確定（確定時に在庫から減算）。単価は単価表から自動入力。在庫不足は警告のみ（登録は可能） |
-| 🧾 請求書 | 出荷先×月で出荷済を集計し、軽減税率8%・税込の請求書を画面表示・印刷（PDF化） |
+| 🚚 出荷登録 | 登録日・納品予定日・請求先・納品先(マスタ選択 or 直接入力)を指定し、**複数商品をまとめて**数量入力 →「出荷」ボタンで確定（確定時に在庫から減算）。単価は単価表(請求先×商品)から自動入力。在庫不足は警告のみ（登録は可能） |
+| 🧾 請求書 | 請求先×月で出荷済を集計し、軽減税率8%・税込の請求書を画面表示・印刷（PDF化）。納品先がある場合は明細に納品先列を表示 |
 | 📈 月次/年次サマリ | 製造数ベースで集計（商品別の製造数・製造高）。`features.production` の部署では売上ベースに代えてこちらを表示 |
 
+- 漬物部では **出荷先＝請求先**（`hq_channels`）として扱う。請求先に複数の **納品先**（`hq_delivery_destinations`）を紐づけられる（商社など）。固定はマスタ登録、単発は出荷登録で直接入力（`hq_shipments.dest_name` にスナップ保存、マスタ選択時は `dest_id` も保持）。
 - 商品ごとに **製造区分** `hq_products.prod_type`（`manufacture`=自社製造 / `consignment`=製造委託）を持ち、製造日報の入力表を区分で分けて管理する（商品マスタで設定）。
-- 出荷先マスタは漬物部のみ拡張表示：郵便番号・住所・電話番号・FAX番号・分類(`ctype`=商社/小売/生協/委託)・担当者・メールを保持（`hq_channels` の追加列）。
+- 請求先マスタ（出荷先マスタ）は漬物部のみ拡張表示：郵便番号・住所・電話番号・FAX番号・分類(`ctype`=商社/小売/生協/委託)・担当者・メールを保持（`hq_channels` の追加列）。
 - 製造日報の **売上(製造高)＝自社製造数 × 商品マスタ単価**。委託入庫(`kind=consignment`)は在庫のみで売上対象外。
   人件費＝勤務時間×時給、材料費＝売上×材料費率、経費＝月固定費の営業日按分。`hq_daily_reports` に保存（売上日報）。
 - `features.production` の部署は「確定後も修正可」のため、売上日報の**自動確定(cron/遅延)を行わない**。
 - 在庫＝`hq_production`(入庫) の累計 − `hq_shipments`(status=shipped) の累計。出荷確定でのみ在庫が減る。
 - 請求は `shipped_date` が対象月内の出荷済を集計（出荷登録時の `unit_price` をスナップショット保存）。
-- 関連テーブル: `hq_production` / `hq_product_prices` / `hq_shipments`。
-- 関連API: `GET/POST /api/production` `/bulk`、`GET /api/inventory`、`GET/POST /api/product-prices` `/bulk`、`GET/POST/PUT/DELETE /api/shipments` `/<id>/ship`、`GET /api/invoices`、`GET /api/production-summary`（製造数ベース月次/年次）。製造日報の確定は `POST /api/production/bulk` ×2 → `POST /api/shifts` → `POST /api/daily-info/<date>` → `POST /api/daily-reports/<date>/generate`。
+- 関連テーブル: `hq_production` / `hq_product_prices` / `hq_shipments` / `hq_delivery_destinations`。
+- 関連API: `GET/POST /api/production` `/bulk`、`GET /api/inventory`、`GET/POST /api/product-prices` `/bulk`、`GET/POST/PUT/DELETE /api/shipments` `/bulk` `/<id>/ship`、`GET/POST/PUT/DELETE /api/delivery-destinations`、`GET /api/invoices`、`GET /api/production-summary`（製造数ベース月次/年次）。製造日報の確定は `POST /api/production/bulk` ×2 → `POST /api/shifts` → `POST /api/daily-info/<date>` → `POST /api/daily-reports/<date>/generate`。
 
 ---
 
