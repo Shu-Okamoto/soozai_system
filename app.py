@@ -551,7 +551,25 @@ def delete_shipment(sid):
     sb.table('hq_shipments').delete().eq('id',sid).eq('department_id',dept_id()).execute()
     return jsonify({'ok': True})
 
-# ─── 請求書（出荷先×月、軽減税率8%・税込）──
+# ─── 発行元（自社）情報マスタ：請求書の差出人 ──
+@app.route('/api/issuer', methods=['GET'])
+def get_issuer():
+    dep = get_dept()
+    return jsonify((dep.get('config') or {}).get('issuer') or {})
+
+@app.route('/api/issuer', methods=['PUT'])
+def update_issuer():
+    d = request.json or {}; did = dept_id()
+    dep = get_dept(); cfg = dep.get('config') or {}
+    issuer = dict(cfg.get('issuer') or {})
+    for f in ('name','zip','address','phone','bank','logo_url'):
+        if f in d: issuer[f] = d[f]
+    cfg['issuer'] = issuer
+    sb.table('hq_departments').update({'config':cfg}).eq('id',did).execute()
+    _refresh_departments()
+    return jsonify({'ok': True, 'issuer': issuer})
+
+# ─── 請求書（請求先×月、軽減税率8%・税込）──
 @app.route('/api/invoices', methods=['GET'])
 def get_invoices():
     did = dept_id()
@@ -567,7 +585,7 @@ def get_invoices():
         q = q.eq('channel_id', ch)
     ships = q.execute().data
     prods = {p['id']:p['name'] for p in sb.table('hq_products').select('id,name').eq('department_id',did).execute().data}
-    chans = {c['id']:c['name'] for c in sb.table('hq_channels').select('id,name').eq('department_id',did).execute().data}
+    chans = {c['id']:c for c in sb.table('hq_channels').select('id,name,zip,address').eq('department_id',did).execute().data}
     by = {}
     has_dest = {}   # 請求先ごとに納品先が1件でもあるか
     for s in ships:
@@ -581,11 +599,13 @@ def get_invoices():
             'unit_price':s['unit_price'],'amount':amt,'dest_name':dest})
     out = []
     for cid, lines in by.items():
-        # 納品先 → 出荷日 → 商品名 の順に並べる
-        lines.sort(key=lambda x:(x['dest_name'], x['shipped_date'] or '', x['product_name']))
+        # 出荷日 → 納品先 → 商品名 の順に並べる
+        lines.sort(key=lambda x:(x['shipped_date'] or '', x['dest_name'], x['product_name']))
         subtotal = sum(l['amount'] for l in lines)
         tax = int(math.floor(subtotal * 0.08))
-        out.append({'channel_id':cid,'channel_name':chans.get(cid,''),'month':month,
+        ci = chans.get(cid, {})
+        out.append({'channel_id':cid,'channel_name':ci.get('name',''),
+                    'channel_zip':ci.get('zip',''),'channel_address':ci.get('address',''),'month':month,
                     'lines':lines,'subtotal':subtotal,'tax':tax,'total':subtotal+tax,
                     'has_dest':bool(has_dest.get(cid))})
     out.sort(key=lambda x:x['channel_name'])
