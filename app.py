@@ -591,6 +591,48 @@ def get_invoices():
     out.sort(key=lambda x:x['channel_name'])
     return jsonify(out)
 
+# ─── 出荷ベースの売上分析（漬物部）──────────────
+@app.route('/api/shipment-analysis', methods=['GET'])
+def shipment_analysis():
+    """月内の出荷（登録日ベース）を、日別明細＋取引先別／商品別／納品先別で集計。"""
+    did = dept_id()
+    month = request.args.get('month')
+    if not month:
+        return jsonify({'ok': False, 'error': 'month が必要です'}), 400
+    y, m = map(int, month.split('-'))
+    last = calendar.monthrange(y, m)[1]
+    start, end = f'{month}-01', f'{month}-{last:02d}'
+    ships = sb.table('hq_shipments').select('*').eq('department_id',did)\
+        .gte('order_date',start).lte('order_date',end).order('order_date').order('id').execute().data
+    prods = {p['id']:p['name'] for p in sb.table('hq_products').select('id,name').eq('department_id',did).execute().data}
+    chans = {c['id']:c['name'] for c in sb.table('hq_channels').select('id,name').eq('department_id',did).execute().data}
+    lines = []
+    by_date, by_ch, by_pr, by_dest = {}, {}, {}, {}
+    total_qty = total_amount = 0
+    for s in ships:
+        qty = s['qty'] or 0; up = s['unit_price'] or 0; amt = qty*up
+        dest = s.get('dest_name') or '（納品先なし）'
+        cid = s['channel_id']; pid = s['product_id']
+        lines.append({'order_date':s['order_date'],'delivery_date':s.get('delivery_date',''),
+                      'channel_id':cid,'channel_name':chans.get(cid,''),'dest_name':s.get('dest_name',''),
+                      'product_id':pid,'product_name':prods.get(pid,''),'qty':qty,'unit_price':up,
+                      'amount':amt,'status':s['status']})
+        total_qty += qty; total_amount += amt
+        def acc(dct, key, name):
+            e = dct.setdefault(key, {'name':name,'qty':0,'amount':0})
+            e['qty'] += qty; e['amount'] += amt
+        d = s['order_date']
+        bd = by_date.setdefault(d, {'qty':0,'amount':0}); bd['qty']+=qty; bd['amount']+=amt
+        acc(by_ch, cid, chans.get(cid,''))
+        acc(by_pr, pid, prods.get(pid,''))
+        acc(by_dest, dest, dest)
+    days   = [{'date':k, **v} for k,v in sorted(by_date.items())]
+    chs    = sorted([{'channel_id':k, **v} for k,v in by_ch.items()],   key=lambda x:-x['amount'])
+    prs    = sorted([{'product_id':k, **v} for k,v in by_pr.items()],   key=lambda x:-x['amount'])
+    dests  = sorted([{**v} for v in by_dest.values()],                  key=lambda x:-x['amount'])
+    return jsonify({'month':month,'total_qty':total_qty,'total_amount':total_amount,
+                    'lines':lines,'by_date':days,'by_channel':chs,'by_product':prs,'by_dest':dests})
+
 # ─── 製造数ベースの月次・年次サマリ（漬物部）──
 @app.route('/api/production-summary', methods=['GET'])
 def production_summary():
