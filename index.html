@@ -119,6 +119,11 @@
     tr:has(td[id^="rt_"]:empty){display:none}
     #plan-table{font-size:24px!important}
     #plan-table th{font-size:18px!important}
+    /* 請求書は1請求先=1ページに収める */
+    .invoice-sheet{page-break-inside:avoid;page-break-after:always;border:none!important}
+    .invoice-sheet:last-child{page-break-after:auto}
+    .invoice-table{font-size:11px}
+    .invoice-table th,.invoice-table td{padding:2px 6px}
   }
   .print-header{display:none;text-align:center;margin-bottom:8px}
   .print-header h2{font-size:16px;font-weight:bold}
@@ -179,6 +184,7 @@
       <button class="nav-item" onclick="showPage('suppliers')"  id="nav-suppliers">🚚 業者マスタ</button>
       <button class="nav-item" onclick="showPage('pricelist')"  id="nav-pricelist">💴 単価表マスタ</button>
       <button class="nav-item" onclick="showPage('deliverydests')" id="nav-deliverydests">📍 納品先マスタ</button>
+      <button class="nav-item" onclick="showPage('issuer')"     id="nav-issuer">🏢 自社情報マスタ</button>
       <button class="nav-item" onclick="showPage('members')"    id="nav-members">👤 メンバーマスタ</button>
     </div>
     <div class="sidebar-bottom">
@@ -306,6 +312,8 @@ function applyDeptFeatures() {
   if (dd && !pickles) dd.style.display = 'none';   // 納品先マスタも production部署のみ
   const sa = document.getElementById('nav-shipanalysis');
   if (sa && !pickles) sa.style.display = 'none';   // 出荷分析も production部署のみ
+  const iss = document.getElementById('nav-issuer');
+  if (iss && !pickles) iss.style.display = 'none'; // 自社情報マスタも production部署のみ
   if (pickles) {
     // 漬物部では出荷先＝請求先として扱う（マスタのラベルを変更）
     const navCh = document.getElementById('nav-channels');
@@ -566,10 +574,10 @@ function showPage(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:(deptFeatures().production?'請求先マスタ':'出荷先マスタ'),orderproducts:'発注商品マスタ',suppliers:'業者マスタ',pricelist:'単価表マスタ',deliverydests:'納品先マスタ',members:'メンバーマスタ',production:'製造日報',inventory:'在庫',shipments:'出荷登録',invoice:'請求書',shipanalysis:'出荷分析',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成',import:'売上実績取込'};
+  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:(deptFeatures().production?'請求先マスタ':'出荷先マスタ'),orderproducts:'発注商品マスタ',suppliers:'業者マスタ',pricelist:'単価表マスタ',deliverydests:'納品先マスタ',issuer:'自社情報マスタ',members:'メンバーマスタ',production:'製造日報',inventory:'在庫',shipments:'出荷登録',invoice:'請求書',shipanalysis:'出荷分析',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成',import:'売上実績取込'};
   document.getElementById('page-title').textContent = titles[page]||'';
   ({plan:renderPlanPage,actual:renderActualPage,report:renderReportPage,
-    menu:renderMenuPage,order:renderOrderPage,checklist:renderChecklistPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,orderproducts:renderOrderProductsPage,suppliers:renderSuppliersPage,pricelist:renderPriceListPage,deliverydests:renderDeliveryDestPage,members:renderMembersPage,
+    menu:renderMenuPage,order:renderOrderPage,checklist:renderChecklistPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,orderproducts:renderOrderProductsPage,suppliers:renderSuppliersPage,pricelist:renderPriceListPage,deliverydests:renderDeliveryDestPage,issuer:renderIssuerPage,members:renderMembersPage,
     production:renderProductionPage,inventory:renderInventoryPage,shipments:renderShipmentsPage,invoice:renderInvoicePage,shipanalysis:renderShipAnalysisPage,
     adminplan:renderAdminPlanPage,adminmenu:renderAdminMenuPage,adminshifts:renderAdminShiftsPage,import:renderImportPage})[page]?.();
 }
@@ -3648,26 +3656,30 @@ async function deleteShipment(id) {
   if (r?.ok) { showToast('削除しました'); renderShipmentsPage(); } else showToast('削除失敗', true);
 }
 
-// ── 請求書（出荷先×月、出荷済を集計・軽減税率8%・税込）──
+// ── 請求書（請求先×月、出荷済を集計・軽減税率8%・税込）──
 async function renderInvoicePage() {
   setLoading();
   const month = currentDate.slice(0,7);
   const chOpts = (cachedChannels||[]).filter(c=>c.active)
     .map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
-  const invoices = await fetch(`${API}/invoices?month=${month}`).then(r=>r.json()).catch(()=>[]);
+  const [invoices, issuer] = await Promise.all([
+    fetch(`${API}/invoices?month=${month}`).then(r=>r.json()).catch(()=>[]),
+    fetch(`${API}/issuer`).then(r=>r.json()).catch(()=>({})),
+  ]);
   document.getElementById('content').innerHTML = `
     <div style="max-width:760px;margin:0 auto">
       <div class="no-print" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px">
         <label style="font-size:13px;color:var(--text2)">請求月</label>
         <input type="month" id="inv-month" value="${month}" onchange="onInvoiceFilterChange(this.value)"
           style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-family:inherit">
-        <label style="font-size:13px;color:var(--text2)">出荷先</label>
+        <label style="font-size:13px;color:var(--text2)">請求先</label>
         <select id="inv-ch" onchange="renderInvoiceList()"><option value="">すべて</option>${chOpts}</select>
         <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="window.print()">🖨 印刷 / PDF</button>
       </div>
       <div id="invoice-list"></div>
     </div>`;
   window._invoiceCache = invoices;
+  window._invoiceIssuer = issuer || {};
   renderInvoiceList();
 }
 
@@ -3690,14 +3702,23 @@ function renderInvoiceList() {
     el.innerHTML = `<div class="text-muted text-center" style="padding:40px">${month} の出荷済データがありません。</div>`;
     return;
   }
+  const iss = window._invoiceIssuer || {};
+  const issuerName = iss.name || 'みかわ 漬物部';
+  const issuerBlock = `
+    <div style="text-align:right;font-size:12px;color:var(--text)">
+      ${iss.logo_url?`<img src="${esc(iss.logo_url)}" alt="logo" style="max-height:48px;max-width:180px;margin-bottom:6px;object-fit:contain">`:''}
+      <div style="font-weight:700;font-size:14px">${esc(issuerName)}</div>
+      ${iss.zip?`<div>〒${esc(iss.zip)}</div>`:''}
+      ${iss.address?`<div>${esc(iss.address)}</div>`:''}
+      ${iss.phone?`<div>TEL: ${esc(iss.phone)}</div>`:''}
+      ${iss.bank?`<div style="margin-top:4px">${esc(iss.bank)}</div>`:''}
+    </div>`;
   el.innerHTML = invoices.map(iv=>{
-    const showDest = !!iv.has_dest;
-    const colCount = showDest ? 6 : 5;
     const lines = iv.lines.map(l=>`
       <tr>
         <td style="text-align:center">${(l.shipped_date||'').slice(5)}</td>
-        ${showDest?`<td style="text-align:left">${esc(l.dest_name||'―')}</td>`:''}
         <td style="text-align:left">${esc(l.product_name)}</td>
+        <td style="text-align:left">${esc(l.dest_name||'―')}</td>
         <td style="text-align:center">${fmt(l.qty)}</td>
         <td style="text-align:right">¥${fmt(l.unit_price)}</td>
         <td style="text-align:right">¥${fmt(l.amount)}</td>
@@ -3705,30 +3726,29 @@ function renderInvoiceList() {
     return `
       <div class="card mb-16 invoice-sheet">
         <div class="card-body">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
             <div>
-              <h2 style="font-size:22px;font-weight:700;margin-bottom:8px">請求書</h2>
-              <div style="font-size:15px;font-weight:600">${esc(iv.channel_name)} 御中</div>
-              <div style="font-size:13px;color:var(--text2);margin-top:4px">${y}年${m}月分（月末締め）</div>
+              <h2 style="font-size:22px;font-weight:700;margin-bottom:10px">請求書</h2>
+              ${iv.channel_zip?`<div style="font-size:12px;color:var(--text2)">〒${esc(iv.channel_zip)}</div>`:''}
+              ${iv.channel_address?`<div style="font-size:12px;color:var(--text2)">${esc(iv.channel_address)}</div>`:''}
+              <div style="font-size:16px;font-weight:600;margin-top:4px">${esc(iv.channel_name)} 御中</div>
+              <div style="font-size:13px;color:var(--text2);margin-top:6px">${y}年${m}月分（月末締め）／発行日：${issueDate}</div>
             </div>
-            <div style="text-align:right;font-size:13px;color:var(--text2)">
-              <div>発行日：${issueDate}</div>
-              <div style="margin-top:6px;font-weight:600;color:var(--text)">みかわ 漬物部</div>
-            </div>
+            ${issuerBlock}
           </div>
-          <div style="background:rgba(0,0,0,.04);border-radius:8px;padding:12px 16px;margin-bottom:16px">
+          <div style="background:rgba(0,0,0,.04);border-radius:8px;padding:10px 16px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:baseline">
             <span style="font-size:13px;color:var(--text2)">ご請求金額（税込）</span>
-            <div style="font-size:26px;font-weight:700">¥${fmt(iv.total)}</div>
+            <div style="font-size:24px;font-weight:700">¥${fmt(iv.total)}</div>
           </div>
-          <div class="table-wrap"><table>
+          <div class="table-wrap"><table class="invoice-table">
             <thead><tr>
-              <th>出荷日</th>${showDest?'<th style="text-align:left">納品先</th>':''}<th style="text-align:left">商品</th><th>数量</th><th>単価</th><th>金額</th>
+              <th>出荷日</th><th style="text-align:left">商品名</th><th style="text-align:left">納品先</th><th>数量</th><th>単価</th><th>金額</th>
             </tr></thead>
             <tbody>${lines}</tbody>
             <tfoot>
-              <tr><td colspan="${colCount-1}" style="text-align:right">小計（税抜）</td><td style="text-align:right">¥${fmt(iv.subtotal)}</td></tr>
-              <tr><td colspan="${colCount-1}" style="text-align:right">消費税（軽減税率8%）</td><td style="text-align:right">¥${fmt(iv.tax)}</td></tr>
-              <tr><td colspan="${colCount-1}" style="text-align:right;font-weight:700">合計（税込）</td><td style="text-align:right;font-weight:700">¥${fmt(iv.total)}</td></tr>
+              <tr><td colspan="5" style="text-align:right">小計（税抜）</td><td style="text-align:right">¥${fmt(iv.subtotal)}</td></tr>
+              <tr><td colspan="5" style="text-align:right">消費税（軽減税率8%）</td><td style="text-align:right">¥${fmt(iv.tax)}</td></tr>
+              <tr><td colspan="5" style="text-align:right;font-weight:700">合計（税込）</td><td style="text-align:right;font-weight:700">¥${fmt(iv.total)}</td></tr>
             </tfoot>
           </table></div>
         </div>
@@ -3952,6 +3972,50 @@ async function deleteDeliveryDest(id) {
   if (!confirm('この納品先を削除しますか？')) return;
   const r = await fetch(`${API}/delivery-destinations/${id}`, {method:'DELETE'}).then(r=>r.json()).catch(()=>null);
   if (r?.ok) { showToast('削除しました'); loadDeliveryDests(); } else showToast('削除失敗', true);
+}
+
+// ── 自社情報マスタ（請求書の発行元：住所・電話・口座・ロゴ）──
+async function renderIssuerPage() {
+  setLoading();
+  const iss = await fetch(`${API}/issuer`).then(r=>r.json()).catch(()=>({}));
+  const f = (k)=>esc(iss?.[k]||'');
+  document.getElementById('content').innerHTML = `
+    <div style="max-width:560px;margin:0 auto">
+      <div class="alert alert-warn no-print" style="margin-bottom:16px">
+        請求書に印字する発行元（自社）情報です。ロゴは画像URLを指定してください。
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">自社情報マスタ</span></div>
+        <div class="card-body">
+          <div class="form-group"><label>発行元名</label><input type="text" id="iss-name" value="${f('name')}" placeholder="みかわ 漬物部"></div>
+          <div class="form-group"><label>郵便番号</label><input type="text" id="iss-zip" value="${f('zip')}" placeholder="123-4567"></div>
+          <div class="form-group"><label>住所</label><input type="text" id="iss-address" value="${f('address')}"></div>
+          <div class="form-group"><label>電話番号</label><input type="text" id="iss-phone" value="${f('phone')}"></div>
+          <div class="form-group"><label>振込先・口座番号</label><input type="text" id="iss-bank" value="${f('bank')}" placeholder="○○銀行 △△支店 普通 1234567"></div>
+          <div class="form-group"><label>ロゴ画像URL</label><input type="text" id="iss-logo" value="${f('logo_url')}" placeholder="https://..."></div>
+          <div id="iss-logo-prev" style="margin-top:4px">${iss?.logo_url?`<img src="${esc(iss.logo_url)}" style="max-height:60px;max-width:200px;object-fit:contain">`:''}</div>
+          <button class="btn btn-primary" style="margin-top:14px" onclick="saveIssuer()">💾 保存</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function saveIssuer() {
+  const body = {
+    name:    document.getElementById('iss-name').value.trim(),
+    zip:     document.getElementById('iss-zip').value.trim(),
+    address: document.getElementById('iss-address').value.trim(),
+    phone:   document.getElementById('iss-phone').value.trim(),
+    bank:    document.getElementById('iss-bank').value.trim(),
+    logo_url:document.getElementById('iss-logo').value.trim(),
+  };
+  const r = await fetch(`${API}/issuer`, {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) {
+    showToast('保存しました');
+    if (currentDeptObj) { currentDeptObj.config = currentDeptObj.config||{}; currentDeptObj.config.issuer = r.issuer; }
+    renderIssuerPage();
+  } else showToast('保存失敗', true);
 }
 
 // ═══════════════════════════════════════════════
