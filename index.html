@@ -3247,7 +3247,35 @@ async function saveProductionReport() {
 async function renderProdMonthlyPage() {
   setLoading();
   const ym = currentDate.slice(0,7);
-  const data = await fetch(`${API}/production-summary?month=${ym}`).then(r=>r.json()).catch(()=>null);
+  const [data, mon] = await Promise.all([
+    fetch(`${API}/production-summary?month=${ym}`).then(r=>r.json()).catch(()=>null),
+    fetch(`${API}/monthly-summary?month=${ym}`).then(r=>r.json()).catch(()=>null),
+  ]);
+  const days = mon?.days || [];
+  // 日別 P&L（売上＝製造高）集計
+  const tot = days.reduce((a,d)=>({
+    sales:a.sales+(d.total_sales||0), material:a.material+(d.material_cost||0),
+    labor:a.labor+(d.labor_cost||0), expense:a.expense+(d.expense||0),
+    profit:a.profit+(d.profit||0), hours:a.hours+(d.total_hours||0),
+  }), {sales:0,material:0,labor:0,expense:0,profit:0,hours:0});
+  const profitRate = tot.sales ? Math.round(tot.profit/tot.sales*1000)/10 : 0;
+  const avgLP = tot.hours ? Math.round(tot.sales/tot.hours) : 0;
+
+  const dayRows = days.map(d=>{
+    const dt=new Date(d.date); const dow='日月火水木金土'[dt.getDay()];
+    return `<tr>
+      <td>${d.date.slice(5)}（${dow}）</td>
+      <td>${d.weather||'―'}</td>
+      <td class="text-right">${fmt(d.total_sales)}</td>
+      <td class="text-right">${fmt(d.material_cost)}</td>
+      <td class="text-right">${fmt(d.labor_cost)}</td>
+      <td class="text-right">${fmt(d.expense)}</td>
+      <td class="text-right ${d.profit>=0?'text-green':'text-danger'}">${fmt(d.profit)}</td>
+      <td class="text-right">${fmt(d.labor_productivity)}</td>
+      <td class="text-right">${d.total_hours}</td>
+    </tr>`;
+  }).join('');
+
   const prodRows = (data?.products||[]).map(p=>`
     <tr>
       <td style="text-align:left">${esc(p.name)}</td>
@@ -3256,17 +3284,45 @@ async function renderProdMonthlyPage() {
       <td style="text-align:right;color:var(--text2)">¥${fmt(p.price)}</td>
       <td style="text-align:right">¥${fmt(p.amount)}</td>
     </tr>`).join('');
+
   document.getElementById('content').innerHTML = `
+    <div class="print-header"><h2>漬物部 月次サマリ（製造数ベース）</h2><p>${ym}</p></div>
     <div class="no-print" style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
       <input type="month" value="${ym}" onchange="currentDate=this.value+'-01';document.getElementById('global-date').value=currentDate;renderMonthlyPage()" style="font-size:13px">
-      <span style="font-size:13px;color:var(--text2)">製造数ベースの月次サマリ（自社製造）</span>
+      <span style="font-size:13px;color:var(--text2)">売上＝製造高（自社製造数×単価）</span>
       <div style="margin-left:auto"><button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 印刷</button></div>
     </div>
-    <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
-      <div class="kpi"><div class="kpi-label">合計製造数</div><div class="kpi-value">${fmt(data?.total_qty||0)}</div></div>
-      <div class="kpi"><div class="kpi-label">合計製造高</div><div class="kpi-value green">¥${fmt(data?.total_amount||0)}</div></div>
-      <div class="kpi"><div class="kpi-label">製造日数</div><div class="kpi-value">${(data?.days||[]).length}<span style="font-size:13px">日</span></div></div>
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-label">製造高（売上）</div><div class="kpi-value green">${fmt(tot.sales)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">材料費</div><div class="kpi-value">${fmt(tot.material)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">人件費計</div><div class="kpi-value warn">${fmt(tot.labor)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">経費</div><div class="kpi-value">${fmt(tot.expense)}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">差引利益</div><div class="kpi-value ${tot.profit>=0?'green':'red'}">${fmt(tot.profit)}</div><div class="kpi-sub">円　利益率 ${profitRate}%</div></div>
+      <div class="kpi"><div class="kpi-label">営業日数</div><div class="kpi-value">${days.length}</div><div class="kpi-sub">日</div></div>
+      <div class="kpi"><div class="kpi-label">人時売平均</div><div class="kpi-value">${fmt(avgLP)}</div><div class="kpi-sub">円/時</div></div>
+      <div class="kpi"><div class="kpi-label">合計製造数</div><div class="kpi-value">${fmt(data?.total_qty||0)}</div><div class="kpi-sub">個</div></div>
     </div>
+
+    <div class="card" style="margin-top:4px">
+      <div class="card-header"><span class="card-title">日別明細</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>日付</th><th>天気</th><th>製造高</th><th>材料費</th><th>人件費</th><th>経費</th><th>差引</th><th>人時売</th><th>総人時</th>
+        </tr></thead>
+        <tbody>${dayRows||'<tr><td colspan="9" class="text-muted text-center" style="padding:20px">データがありません</td></tr>'}</tbody>
+        <tfoot><tr class="fw-bold" style="background:var(--surface2)">
+          <td class="left">合計</td><td>―</td>
+          <td class="text-right">${fmt(tot.sales)}</td>
+          <td class="text-right">${fmt(tot.material)}</td>
+          <td class="text-right">${fmt(tot.labor)}</td>
+          <td class="text-right">${fmt(tot.expense)}</td>
+          <td class="text-right ${tot.profit>=0?'text-green':'text-danger'}">${fmt(tot.profit)}</td>
+          <td class="text-right">${fmt(avgLP)}</td>
+          <td class="text-right">${tot.hours}</td>
+        </tr></tfoot>
+      </table></div>
+    </div>
+
     <div class="card" style="margin-top:16px">
       <div class="card-header"><span class="card-title">商品別 製造数（${ym}）</span></div>
       <div class="table-wrap"><table>
