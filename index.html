@@ -3546,8 +3546,12 @@ function drawShipmentList() {
 }
 
 function prodOptionsHtml(sel) {
-  return `<option value="">選択</option>` +
-    (cachedProducts||[]).filter(p=>p.active).map(p=>`<option value="${p.id}"${sel==p.id?' selected':''}>${esc(p.name)}</option>`).join('');
+  // 請求先未選択時は選べない。選択時は単価表に単価がある商品のみを候補に出す。
+  const chSelected = !!document.getElementById('sh-ch')?.value;
+  if (!chSelected) return `<option value="">先に請求先を選択</option>`;
+  const opts = (cachedProducts||[]).filter(p=>p.active && shipmentPriceMap[p.id] != null)
+    .map(p=>`<option value="${p.id}"${sel==p.id?' selected':''}>${esc(p.name)}（¥${fmt(shipmentPriceMap[p.id])}）</option>`).join('');
+  return `<option value="">選択</option>` + (opts || `<option value="" disabled>単価未設定（単価表マスタで設定）</option>`);
 }
 
 function addShipRow() {
@@ -3576,10 +3580,11 @@ async function onShipChannelChange() {
     prices.forEach(p => shipmentPriceMap[p.product_id] = p.price);
     dests.forEach(d => { destSel.innerHTML += `<option value="${d.id}" data-name="${esc(d.name)}">${esc(d.name)}</option>`; });
   }
-  // 既存行の単価を更新
-  document.querySelectorAll('#sh-rows tr').forEach(tr => {
-    const pr = tr.querySelector('.sh-pr');
-    if (pr) onShipRowProduct(pr);
+  // 既存行の商品候補を「単価のある商品」に組み替え、単価を更新
+  document.querySelectorAll('#sh-rows .sh-pr').forEach(sel => {
+    const cur = sel.value;
+    sel.innerHTML = prodOptionsHtml(cur);   // 単価のない商品はリストから外れ、選択は解除される
+    onShipRowProduct(sel);
   });
 }
 
