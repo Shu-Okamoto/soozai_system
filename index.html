@@ -3829,6 +3829,7 @@ function renderInvoiceList() {
       ${iss.zip?`<div>〒${esc(iss.zip)}</div>`:''}
       ${iss.address?`<div>${esc(iss.address)}</div>`:''}
       ${iss.phone?`<div>TEL: ${esc(iss.phone)}</div>`:''}
+      ${iss.reg_no?`<div style="margin-top:4px">登録番号: ${esc(iss.reg_no)}</div>`:''}
       ${iss.bank?`<div style="margin-top:4px">${esc(iss.bank)}</div>`:''}
     </div>`;
   el.innerHTML = invoices.map(iv=>{
@@ -4118,6 +4119,7 @@ async function renderIssuerPage() {
         <div class="card-header"><span class="card-title">自社情報マスタ</span></div>
         <div class="card-body">
           <div class="form-group"><label>発行元名</label><input type="text" id="iss-name" value="${f('name')}" placeholder="みかわ 漬物部"></div>
+          <div class="form-group"><label>適格請求書発行事業者 登録番号</label><input type="text" id="iss-regno" value="${f('reg_no')}" placeholder="T1234567890123"></div>
           <div class="form-group"><label>郵便番号</label><input type="text" id="iss-zip" value="${f('zip')}" placeholder="123-4567"></div>
           <div class="form-group"><label>住所</label><input type="text" id="iss-address" value="${f('address')}"></div>
           <div class="form-group"><label>電話番号</label><input type="text" id="iss-phone" value="${f('phone')}"></div>
@@ -4133,6 +4135,7 @@ async function renderIssuerPage() {
 async function saveIssuer() {
   const body = {
     name:    document.getElementById('iss-name').value.trim(),
+    reg_no:  document.getElementById('iss-regno').value.trim(),
     zip:     document.getElementById('iss-zip').value.trim(),
     address: document.getElementById('iss-address').value.trim(),
     phone:   document.getElementById('iss-phone').value.trim(),

@@ -130,7 +130,7 @@ python app.py
 - 漬物部では **出荷先＝請求先**（`hq_channels`）として扱う。請求先に複数の **納品先**（`hq_delivery_destinations`）を紐づけられる（商社など）。固定はマスタ登録（名称・郵便番号・住所・電話番号）、単発は出荷登録で直接入力（`hq_shipments.dest_name` にスナップ保存、マスタ選択時は `dest_id` も保持）。
 - 商品ごとに **製造区分** `hq_products.prod_type`（`manufacture`=自社製造 / `consignment`=製造委託）を持ち、製造日報の入力表を区分で分けて管理する（商品マスタで設定）。
 - 請求先マスタ（出荷先マスタ）は漬物部のみ拡張表示：郵便番号・住所・電話番号・FAX番号・分類(`ctype`=商社/小売/生協/委託)・担当者・メールを保持（`hq_channels` の追加列）。
-- 発行元（自社）情報は **自社情報マスタ** で編集し `hq_departments.config.issuer`（name/zip/address/phone/bank/logo_url）に保存。請求書の差出人として印字。
+- 発行元（自社）情報は **自社情報マスタ** で編集し `hq_departments.config.issuer`（name/reg_no/zip/address/phone/bank/logo_url）に保存。請求書の差出人として印字（`reg_no`＝適格請求書発行事業者の登録番号 Txxxx を「登録番号」として表示）。
 - 製造日報の **売上(製造高)＝自社製造数 × 商品マスタ単価**。委託入庫(`kind=consignment`)は在庫のみで売上対象外。
   人件費＝勤務時間×時給、材料費＝売上×材料費率、経費＝月固定費の営業日按分。`hq_daily_reports` に保存（売上日報）。
 - `features.production` の部署は「確定後も修正可」のため、売上日報の**自動確定(cron/遅延)を行わない**。
