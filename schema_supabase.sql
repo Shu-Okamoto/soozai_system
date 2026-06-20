@@ -422,6 +422,13 @@ ALTER TABLE hq_shipments ADD COLUMN IF NOT EXISTS delivery_date TEXT DEFAULT '';
 ALTER TABLE hq_shipments ADD COLUMN IF NOT EXISTS dest_id   BIGINT REFERENCES hq_delivery_destinations(id) ON DELETE SET NULL;
 ALTER TABLE hq_shipments ADD COLUMN IF NOT EXISTS dest_name TEXT DEFAULT '';
 
+-- 送料など商品マスタ外の明細に対応（再実行安全）。
+--   item_type: 'product'(商品・税8%) | 'freight'(送料・税10%)
+--   item_name: 商品マスタ外明細の表示名（送料 等）。product_id は freight 時は NULL。
+ALTER TABLE hq_shipments ADD COLUMN IF NOT EXISTS item_type TEXT DEFAULT 'product';
+ALTER TABLE hq_shipments ADD COLUMN IF NOT EXISTS item_name TEXT DEFAULT '';
+ALTER TABLE hq_shipments ALTER COLUMN product_id DROP NOT NULL;
+
 -- 漬物部の機能フラグを有効化（製造日報／在庫／出荷登録／請求書／単価表マスタを表示）。
 -- 新規インストールは上の seed で、既存DBはこの UPDATE で反映（再実行安全）。
 UPDATE hq_departments

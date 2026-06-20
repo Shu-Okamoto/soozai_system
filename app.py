@@ -404,6 +404,8 @@ def get_inventory():
         in_map[r['product_id']] = in_map.get(r['product_id'],0) + (r['qty'] or 0)
     shipped, reserved = {}, {}
     for s in ship_rows:
+        if not s.get('product_id'):   # 送料など商品マスタ外は在庫に影響しない
+            continue
         tgt = shipped if s['status'] == 'shipped' else reserved
         tgt[s['product_id']] = tgt.get(s['product_id'],0) + (s['qty'] or 0)
     out = []
@@ -514,18 +516,27 @@ def add_shipments_bulk():
     if not d.get('order_date') or not d.get('channel_id'):
         return jsonify({'ok': False, 'error': '登録日と請求先が必要です'}), 400
     ch = d['channel_id']
+    common = {'department_id':did,'order_date':d['order_date'],'channel_id':ch,'status':'registered',
+              'note':d.get('note',''),'delivery_date':d.get('delivery_date','') or '',
+              'dest_id':d.get('dest_id') or None,'dest_name':d.get('dest_name','') or ''}
     rows = []
     for it in d.get('items', []):
-        pid = it.get('product_id'); qty = it.get('qty', 0) or 0
+        qty = it.get('qty', 0) or 0
+        if it.get('item_type') == 'freight':
+            # 送料（税10%）。商品マスタ外の明細。
+            up = it.get('unit_price') or 0
+            if qty == 0 or up == 0:
+                continue
+            rows.append({**common,'product_id':None,'item_type':'freight','item_name':'送料',
+                         'qty':qty,'unit_price':up})
+            continue
+        pid = it.get('product_id')
         if not pid or qty == 0:
             continue
         up = it.get('unit_price')
         if up in (None, ''):
             up = _price_for(did, ch, pid)
-        rows.append({'department_id':did,'order_date':d['order_date'],'channel_id':ch,
-                     'product_id':pid,'qty':qty,'unit_price':up or 0,'status':'registered',
-                     'note':d.get('note',''),'delivery_date':d.get('delivery_date','') or '',
-                     'dest_id':d.get('dest_id') or None,'dest_name':d.get('dest_name','') or ''})
+        rows.append({**common,'product_id':pid,'item_type':'product','qty':qty,'unit_price':up or 0})
     if not rows:
         return jsonify({'ok': False, 'error': '商品が選択されていません'}), 400
     sb.table('hq_shipments').insert(rows).execute()
@@ -594,20 +605,28 @@ def get_invoices():
         dest = s.get('dest_name') or ''
         if dest:
             has_dest[s['channel_id']] = True
+        is_freight = s.get('item_type') == 'freight'
+        rate = 10 if is_freight else 8
+        name = (s.get('item_name') or '送料') if is_freight else prods.get(s['product_id'], '')
         by.setdefault(s['channel_id'], []).append({
             'shipped_date':s['shipped_date'],'product_id':s['product_id'],
-            'product_name':prods.get(s['product_id'],''),'qty':s['qty'],
+            'product_name':name,'qty':s['qty'],'tax_rate':rate,
             'unit_price':s['unit_price'],'amount':amt,'dest_name':dest})
     out = []
     for cid, lines in by.items():
         # 出荷日 → 納品先 → 商品名 の順に並べる
         lines.sort(key=lambda x:(x['shipped_date'] or '', x['dest_name'], x['product_name']))
-        subtotal = sum(l['amount'] for l in lines)
-        tax = int(math.floor(subtotal * 0.08))
+        sub8  = sum(l['amount'] for l in lines if l['tax_rate'] == 8)
+        sub10 = sum(l['amount'] for l in lines if l['tax_rate'] == 10)
+        subtotal = sub8 + sub10
+        tax8  = int(math.floor(sub8  * 0.08))
+        tax10 = int(math.floor(sub10 * 0.10))
+        tax = tax8 + tax10
         ci = chans.get(cid, {})
         out.append({'channel_id':cid,'channel_name':ci.get('name',''),
                     'channel_zip':ci.get('zip',''),'channel_address':ci.get('address',''),'month':month,
-                    'lines':lines,'subtotal':subtotal,'tax':tax,'total':subtotal+tax,
+                    'lines':lines,'subtotal':subtotal,'sub8':sub8,'sub10':sub10,
+                    'tax8':tax8,'tax10':tax10,'tax':tax,'total':subtotal+tax,
                     'has_dest':bool(has_dest.get(cid))})
     out.sort(key=lambda x:x['channel_name'])
     return jsonify(out)
@@ -634,9 +653,12 @@ def shipment_analysis():
         qty = s['qty'] or 0; up = s['unit_price'] or 0; amt = qty*up
         dest = s.get('dest_name') or '（納品先なし）'
         cid = s['channel_id']; pid = s['product_id']
+        is_freight = s.get('item_type') == 'freight'
+        pname = (s.get('item_name') or '送料') if is_freight else prods.get(pid,'')
+        pkey  = 'freight' if is_freight else pid
         lines.append({'order_date':s['order_date'],'delivery_date':s.get('delivery_date',''),
                       'channel_id':cid,'channel_name':chans.get(cid,''),'dest_name':s.get('dest_name',''),
-                      'product_id':pid,'product_name':prods.get(pid,''),'qty':qty,'unit_price':up,
+                      'product_id':pid,'product_name':pname,'qty':qty,'unit_price':up,
                       'amount':amt,'status':s['status']})
         total_qty += qty; total_amount += amt
         def acc(dct, key, name):
@@ -645,7 +667,7 @@ def shipment_analysis():
         d = s['order_date']
         bd = by_date.setdefault(d, {'qty':0,'amount':0}); bd['qty']+=qty; bd['amount']+=amt
         acc(by_ch, cid, chans.get(cid,''))
-        acc(by_pr, pid, prods.get(pid,''))
+        acc(by_pr, pkey, pname)
         acc(by_dest, dest, dest)
     days   = [{'date':k, **v} for k,v in sorted(by_date.items())]
     chs    = sorted([{'channel_id':k, **v} for k,v in by_ch.items()],   key=lambda x:-x['amount'])
