@@ -297,7 +297,8 @@ function deptFeatures() {
 // 部署の機能フラグでナビ項目を出し分け、ラベル/スイッチャーを更新
 function applyDeptFeatures() {
   const feats = deptFeatures();
-  const gate = { menu:'weekly_menu', adminmenu:'weekly_menu', order:'order_calc' };
+  const gate = { menu:'weekly_menu', adminmenu:'weekly_menu', order:'order_calc',
+                 orderproducts:'order_calc', suppliers:'order_calc' };
   for (const [page, feat] of Object.entries(gate)) {
     const el = document.getElementById('nav-' + page);
     if (el) el.style.display = feats[feat] ? '' : 'none';
