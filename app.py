@@ -396,54 +396,73 @@ def save_production():
 @app.route('/api/inventory', methods=['GET'])
 def get_inventory():
     did = dept_id()
-    as_of = request.args.get('as_of') or today_jst().isoformat()
+    month = request.args.get('month')
+    today = today_jst().isoformat()
     prods = sb.table('hq_products').select('id,name,category').eq('department_id',did).eq('active',1).order('id').execute().data
-    # 基準日(as_of)時点：製造日<=as_of の入庫、出荷日<=as_of の出荷済、登録日<=as_of の登録分
-    prod_rows = sb.table('hq_production').select('product_id,qty,date').eq('department_id',did)\
-        .lte('date',as_of).execute().data
+    prod_rows = sb.table('hq_production').select('product_id,qty,date').eq('department_id',did).execute().data
     ship_rows = sb.table('hq_shipments').select('product_id,qty,status,shipped_date,order_date').eq('department_id',did).execute().data
-    inflows = {}   # pid -> [[date, qty], ...]（製造日昇順にする）
+    inflows = {}   # pid -> [(date, qty), ...]
     for r in prod_rows:
         if not r.get('product_id'):
             continue
-        inflows.setdefault(r['product_id'], []).append([r.get('date') or '', r['qty'] or 0])
-    shipped, reserved = {}, {}
+        inflows.setdefault(r['product_id'], []).append((r.get('date') or '', r['qty'] or 0))
+    shipped_l, reg_l = {}, {}   # pid -> [(date, qty), ...]
     for s in ship_rows:
         if not s.get('product_id'):   # 送料など商品マスタ外は在庫に影響しない
             continue
         if s['status'] == 'shipped':
-            if (s.get('shipped_date') or '') <= as_of:
-                shipped[s['product_id']] = shipped.get(s['product_id'],0) + (s['qty'] or 0)
+            shipped_l.setdefault(s['product_id'], []).append((s.get('shipped_date') or '', s['qty'] or 0))
         else:
-            if (s.get('order_date') or '') <= as_of:
-                reserved[s['product_id']] = reserved.get(s['product_id'],0) + (s['qty'] or 0)
+            reg_l.setdefault(s['product_id'], []).append((s.get('order_date') or '', s['qty'] or 0))
     def days_between(d1, d2):
-        try:
-            return (date.fromisoformat(d1) - date.fromisoformat(d2)).days
-        except Exception:
-            return None
-    out = []
+        try:    return (date.fromisoformat(d1) - date.fromisoformat(d2)).days
+        except Exception: return None
+    def sum_le(lst, d):  return sum(q for (dt,q) in lst if dt and dt <= d)
+    def sum_rng(lst, a, b): return sum(q for (dt,q) in lst if dt and a <= dt <= b)
+    def fifo_remaining(pid, upto):
+        """製造日<=upto の入庫から、出荷日<=upto の出荷済をFIFOで消し込み、残ロットを返す。"""
+        lots = sorted([(dt,q) for (dt,q) in inflows.get(pid,[]) if dt and dt <= upto], key=lambda x:x[0])
+        remain = sum_le(shipped_l.get(pid,[]), upto)
+        out = []
+        for dt, q in lots:
+            if remain >= q: remain -= q; continue
+            out.append({'date':dt,'qty':q-remain}); remain = 0
+        return out
+
+    items = []
+    if month:
+        y, m = map(int, month.split('-')); last = calendar.monthrange(y, m)[1]
+        start, end = f'{month}-01', f'{month}-{last:02d}'
+        prev_end = (date(y, m, 1) - timedelta(days=1)).isoformat()
+        ref = end if end < today else today      # 経過日数の基準（過去月は月末、当月は今日）
+        for p in prods:
+            pid = p['id']
+            opening = sum_le(inflows.get(pid,[]), prev_end) - sum_le(shipped_l.get(pid,[]), prev_end)
+            in_month  = sum_rng(inflows.get(pid,[]), start, end)
+            out_month = sum_rng(shipped_l.get(pid,[]), start, end)
+            closing = opening + in_month - out_month
+            reserved = sum_le(reg_l.get(pid,[]), end)
+            lots = fifo_remaining(pid, end)
+            oldest = next((l['date'] for l in lots if l['date']), None)
+            items.append({'product_id':pid,'name':p['name'],'category':p.get('category',''),
+                          'opening':opening,'in_month':in_month,'out_month':out_month,'closing':closing,
+                          'reserved':reserved,'available':closing-reserved,
+                          'oldest_date':oldest,'age_days':days_between(ref, oldest) if oldest else None,'lots':lots})
+        return jsonify({'month':month,'items':items})
+
+    # 月指定なし：基準日(as_of, 既定=今日)時点の累計在庫
+    as_of = request.args.get('as_of') or today
     for p in prods:
         pid = p['id']
-        lots = sorted(inflows.get(pid, []), key=lambda x: x[0])   # 製造日昇順（FIFO）
-        i  = sum(q for _, q in lots)
-        sh = shipped.get(pid, 0)
-        rv = reserved.get(pid, 0)
-        # 出荷済を古い製造分から消し込み（FIFO）→ 在庫として残るロットを算出
-        remain = sh
-        rem_lots = []
-        for d, q in lots:
-            if remain >= q:
-                remain -= q
-                continue
-            rem_lots.append({'date': d, 'qty': q - remain})
-            remain = 0
-        oldest = next((l['date'] for l in rem_lots if l['date']), None)
-        out.append({'product_id':pid,'name':p['name'],'category':p.get('category',''),
-                    'in_qty':i,'shipped_qty':sh,'on_hand':i-sh,'reserved':rv,'available':i-sh-rv,
-                    'oldest_date':oldest,'age_days':days_between(as_of, oldest) if oldest else None,
-                    'lots':rem_lots})
-    return jsonify({'as_of':as_of,'items':out})
+        i  = sum_le(inflows.get(pid,[]), as_of)
+        sh = sum_le(shipped_l.get(pid,[]), as_of)
+        rv = sum_le(reg_l.get(pid,[]), as_of)
+        lots = fifo_remaining(pid, as_of)
+        oldest = next((l['date'] for l in lots if l['date']), None)
+        items.append({'product_id':pid,'name':p['name'],'category':p.get('category',''),
+                      'in_qty':i,'shipped_qty':sh,'on_hand':i-sh,'reserved':rv,'available':i-sh-rv,
+                      'oldest_date':oldest,'age_days':days_between(as_of, oldest) if oldest else None,'lots':lots})
+    return jsonify({'as_of':as_of,'items':items})
 
 # ─── 出荷先×商品の単価表 ─────────────────────
 @app.route('/api/product-prices', methods=['GET'])
@@ -587,6 +606,18 @@ def ship_shipment(sid):
     sb.table('hq_shipments').update({'status':'shipped','shipped_date':shipped})\
         .eq('id',sid).eq('department_id',did).execute()
     return jsonify({'ok': True})
+
+@app.route('/api/shipments/ship-bulk', methods=['POST'])
+def ship_shipments_bulk():
+    """複数の出荷登録をまとめて出荷確定する。ids:[...], shipped_date。"""
+    d = request.json or {}; did = dept_id()
+    ids = [int(i) for i in (d.get('ids') or [])]
+    if not ids:
+        return jsonify({'ok': False, 'error': 'ids が必要です'}), 400
+    shipped = d.get('shipped_date') or date.today().isoformat()
+    sb.table('hq_shipments').update({'status':'shipped','shipped_date':shipped})\
+        .in_('id',ids).eq('department_id',did).execute()
+    return jsonify({'ok': True, 'count': len(ids)})
 
 @app.route('/api/shipments/<int:sid>', methods=['DELETE'])
 def delete_shipment(sid):
