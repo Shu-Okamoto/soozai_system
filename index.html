@@ -3834,7 +3834,7 @@ function renderInvoiceList() {
   el.innerHTML = invoices.map(iv=>{
     const lines = iv.lines.map(l=>`
       <tr>
-        <td style="text-align:center">${(l.shipped_date||'').slice(5)}</td>
+        <td style="text-align:center">${((l.delivery_date||l.shipped_date)||'').slice(5)}</td>
         <td style="text-align:left">${esc(l.product_name)}</td>
         <td style="text-align:left">${esc(l.dest_name||'―')}</td>
         <td style="text-align:center">${fmt(l.qty)}</td>
@@ -3860,7 +3860,7 @@ function renderInvoiceList() {
           </div>
           <div class="table-wrap"><table class="invoice-table">
             <thead><tr>
-              <th>出荷日</th><th style="text-align:left">商品名</th><th style="text-align:left">納品先</th><th>数量</th><th>単価</th><th>金額</th>
+              <th>納品日</th><th style="text-align:left">商品名</th><th style="text-align:left">納品先</th><th>数量</th><th>単価</th><th>金額</th>
             </tr></thead>
             <tbody>${lines}</tbody>
             <tfoot>

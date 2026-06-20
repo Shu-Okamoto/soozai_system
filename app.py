@@ -670,13 +670,14 @@ def get_invoices():
         rate = 10 if is_freight else 8
         name = (s.get('item_name') or '送料') if is_freight else prods.get(s['product_id'], '')
         by.setdefault(s['channel_id'], []).append({
-            'shipped_date':s['shipped_date'],'product_id':s['product_id'],
+            'shipped_date':s['shipped_date'],'delivery_date':s.get('delivery_date') or '',
+            'product_id':s['product_id'],
             'product_name':name,'qty':s['qty'],'tax_rate':rate,
             'unit_price':s['unit_price'],'amount':amt,'dest_name':dest})
     out = []
     for cid, lines in by.items():
-        # 出荷日 → 納品先 → 商品名 の順に並べる
-        lines.sort(key=lambda x:(x['shipped_date'] or '', x['dest_name'], x['product_name']))
+        # 納品日(納品予定日) → 納品先 → 商品名 の順に並べる
+        lines.sort(key=lambda x:(x['delivery_date'] or x['shipped_date'] or '', x['dest_name'], x['product_name']))
         sub8  = sum(l['amount'] for l in lines if l['tax_rate'] == 8)
         sub10 = sum(l['amount'] for l in lines if l['tax_rate'] == 10)
         subtotal = sub8 + sub10
