@@ -129,6 +129,7 @@
   .print-header h2{font-size:16px;font-weight:bold}
   .print-header p{font-size:16px;margin-top:2px}
   .print-only{display:none}
+  .hidden{display:none!important}
   @media print{.print-only{display:flex!important;flex-wrap:wrap;gap:16px;justify-content:center;margin-bottom:8px;font-size:16px}
     .print-only strong{font-size:18px}}
   #plan-table{font-size:24px}
@@ -165,7 +166,7 @@
       <button class="nav-item" onclick="showPage('adminmenu')"   id="nav-adminmenu">🍱 献立作成</button>
       <button class="nav-item" onclick="showPage('adminshifts')" id="nav-adminshifts">📅 シフト作成</button>
     </div>
-    <div class="nav-group admin-only">
+    <div class="nav-group admin-only" id="navgroup-analysis">
       <div class="nav-label">分析</div>
       <button class="nav-item" onclick="showPage('monthly')" id="nav-monthly">📈 月次サマリ</button>
       <button class="nav-item" onclick="showPage('yearly')"  id="nav-yearly">📈 年次サマリ</button>
@@ -324,6 +325,9 @@ function applyDeptFeatures() {
     // 月次・年次は残す（製造数ベースで集計して表示）。
     ['nav-plan','nav-actual','nav-report','nav-adminplan']
       .forEach(id => { const e = document.getElementById(id); if (e) e.style.display = 'none'; });
+    // マスタ以外（請求書・分析）はメンバーにも表示する（admin-only を上書き）。
+    ['nav-invoice','navgroup-analysis','nav-monthly','nav-yearly','nav-shipanalysis']
+      .forEach(id => { const e = document.getElementById(id); if (e) e.style.display = ''; });
   }
   // 弁当部以外はサイドバーに部署名を表示（弁当部は従来表記のまま）
   const lbl = document.getElementById('dept-label');
@@ -3381,12 +3385,18 @@ async function renderProdYearlyPage() {
     </div>`;
 }
 
-// ── 在庫一覧（入庫累計 − 出荷済、引当・引当可も表示）──
+// ── 在庫一覧（基準日時点。製造日FIFOで最古製造日・経過日数も表示）──
 async function renderInventoryPage() {
   setLoading();
-  const inv = await fetch(`${API}/inventory`).then(r=>r.json()).catch(()=>[]);
-  const rows = inv.map(r=>`
-    <tr>
+  const asOf = currentDate;
+  const data = await fetch(`${API}/inventory?as_of=${asOf}`).then(r=>r.json()).catch(()=>({items:[]}));
+  const items = data.items || [];
+  const rows = items.map((r,idx)=>{
+    const lotDetail = (r.lots||[]).filter(l=>l.qty>0)
+      .map(l=>`${(l.date||'').slice(5)||'?'}：${fmt(l.qty)}`).join(' ／ ') || '在庫なし';
+    const ageBadge = r.age_days==null ? '―'
+      : `${(r.oldest_date||'').slice(5)}<br><span style="font-size:11px;color:${r.age_days>=30?'var(--danger)':'var(--text2)'}">${r.age_days}日経過</span>`;
+    return `<tr>
       <td style="text-align:left">${esc(r.name)}</td>
       <td style="text-align:left;color:var(--text2)">${esc(r.category||'')}</td>
       <td style="text-align:center">${fmt(r.in_qty)}</td>
@@ -3394,21 +3404,29 @@ async function renderInventoryPage() {
       <td style="text-align:center;font-weight:700">${fmt(r.on_hand)}</td>
       <td style="text-align:center;color:var(--text2)">${fmt(r.reserved)}</td>
       <td style="text-align:center;font-weight:700;color:${r.available<0?'var(--danger)':'inherit'}">${fmt(r.available)}</td>
-    </tr>`).join('');
+      <td style="text-align:center">${ageBadge}</td>
+      <td class="no-print" style="text-align:center">${(r.lots||[]).some(l=>l.qty>0)?`<button class="btn btn-secondary btn-sm" onclick="document.getElementById('lot${idx}').classList.toggle('hidden')">明細</button>`:''}</td>
+    </tr>
+    <tr id="lot${idx}" class="hidden"><td colspan="9" style="text-align:left;background:var(--surface2);font-size:12px;color:var(--text2);padding:6px 10px">製造日別 在庫残：${lotDetail}</td></tr>`;
+  }).join('');
   document.getElementById('content').innerHTML = `
-    <div style="max-width:860px;margin:0 auto">
-      <div class="no-print" style="display:flex;justify-content:flex-end;margin-bottom:8px">
-        <button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 印刷</button>
+    <div style="max-width:960px;margin:0 auto">
+      <div class="no-print" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+        <label style="font-size:13px;color:var(--text2)">基準日</label>
+        <input type="date" value="${asOf}" onchange="currentDate=this.value;document.getElementById('global-date').value=this.value;renderInventoryPage()"
+          style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-family:inherit">
+        <span style="font-size:12px;color:var(--text2)">この日時点の在庫（製造日≦基準日・出荷日≦基準日で計算）</span>
+        <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="window.print()">🖨 印刷</button>
       </div>
       <div class="card">
         <div class="card-header"><span class="card-title">在庫一覧</span>
-          <span class="text-muted" style="font-size:12px">在庫＝入庫累計−出荷済／引当可＝在庫−未出荷の登録分</span></div>
+          <span class="text-muted" style="font-size:12px">在庫＝入庫−出荷済／引当可＝在庫−未出荷の登録分／最古製造日はFIFOで算出</span></div>
         <div class="table-wrap"><table>
           <thead><tr>
-            <th style="text-align:left;min-width:160px">商品名</th><th style="text-align:left">カテゴリ</th>
-            <th>入庫</th><th>出荷済</th><th>在庫</th><th>引当(未出荷)</th><th>引当可</th>
+            <th style="text-align:left;min-width:150px">商品名</th><th style="text-align:left">カテゴリ</th>
+            <th>入庫</th><th>出荷済</th><th>在庫</th><th>引当(未出荷)</th><th>引当可</th><th>最古製造日</th><th class="no-print"></th>
           </tr></thead>
-          <tbody>${rows||'<tr><td colspan="7" class="text-muted text-center" style="padding:20px">在庫データなし</td></tr>'}</tbody>
+          <tbody>${rows||'<tr><td colspan="9" class="text-muted text-center" style="padding:20px">在庫データなし</td></tr>'}</tbody>
         </table></div>
       </div>
     </div>`;
@@ -3428,7 +3446,7 @@ async function renderShipmentsPage() {
     fetch(`${API}/shipments?from=${month}-01&to=${month}-${String(last).padStart(2,'0')}`).then(r=>r.json()).catch(()=>[]),
     fetch(`${API}/inventory`).then(r=>r.json()).catch(()=>[]),
   ]);
-  inventoryAvailMap = {}; inv.forEach(r => inventoryAvailMap[r.product_id] = r.available);
+  inventoryAvailMap = {}; (inv.items||[]).forEach(r => inventoryAvailMap[r.product_id] = r.available);
   const prodName = {}; (cachedProducts||[]).forEach(p=>prodName[p.id]=p.name);
   const chName = {}; (cachedChannels||[]).forEach(c=>chName[c.id]=c.name);
 

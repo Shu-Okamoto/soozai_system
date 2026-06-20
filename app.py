@@ -396,24 +396,54 @@ def save_production():
 @app.route('/api/inventory', methods=['GET'])
 def get_inventory():
     did = dept_id()
+    as_of = request.args.get('as_of') or today_jst().isoformat()
     prods = sb.table('hq_products').select('id,name,category').eq('department_id',did).eq('active',1).order('id').execute().data
-    prod_rows = sb.table('hq_production').select('product_id,qty').eq('department_id',did).execute().data
-    ship_rows = sb.table('hq_shipments').select('product_id,qty,status').eq('department_id',did).execute().data
-    in_map = {}
+    # 基準日(as_of)時点：製造日<=as_of の入庫、出荷日<=as_of の出荷済、登録日<=as_of の登録分
+    prod_rows = sb.table('hq_production').select('product_id,qty,date').eq('department_id',did)\
+        .lte('date',as_of).execute().data
+    ship_rows = sb.table('hq_shipments').select('product_id,qty,status,shipped_date,order_date').eq('department_id',did).execute().data
+    inflows = {}   # pid -> [[date, qty], ...]（製造日昇順にする）
     for r in prod_rows:
-        in_map[r['product_id']] = in_map.get(r['product_id'],0) + (r['qty'] or 0)
+        if not r.get('product_id'):
+            continue
+        inflows.setdefault(r['product_id'], []).append([r.get('date') or '', r['qty'] or 0])
     shipped, reserved = {}, {}
     for s in ship_rows:
         if not s.get('product_id'):   # 送料など商品マスタ外は在庫に影響しない
             continue
-        tgt = shipped if s['status'] == 'shipped' else reserved
-        tgt[s['product_id']] = tgt.get(s['product_id'],0) + (s['qty'] or 0)
+        if s['status'] == 'shipped':
+            if (s.get('shipped_date') or '') <= as_of:
+                shipped[s['product_id']] = shipped.get(s['product_id'],0) + (s['qty'] or 0)
+        else:
+            if (s.get('order_date') or '') <= as_of:
+                reserved[s['product_id']] = reserved.get(s['product_id'],0) + (s['qty'] or 0)
+    def days_between(d1, d2):
+        try:
+            return (date.fromisoformat(d1) - date.fromisoformat(d2)).days
+        except Exception:
+            return None
     out = []
     for p in prods:
-        i = in_map.get(p['id'],0); sh = shipped.get(p['id'],0); rv = reserved.get(p['id'],0)
-        out.append({'product_id':p['id'],'name':p['name'],'category':p.get('category',''),
-                    'in_qty':i,'shipped_qty':sh,'on_hand':i-sh,'reserved':rv,'available':i-sh-rv})
-    return jsonify(out)
+        pid = p['id']
+        lots = sorted(inflows.get(pid, []), key=lambda x: x[0])   # 製造日昇順（FIFO）
+        i  = sum(q for _, q in lots)
+        sh = shipped.get(pid, 0)
+        rv = reserved.get(pid, 0)
+        # 出荷済を古い製造分から消し込み（FIFO）→ 在庫として残るロットを算出
+        remain = sh
+        rem_lots = []
+        for d, q in lots:
+            if remain >= q:
+                remain -= q
+                continue
+            rem_lots.append({'date': d, 'qty': q - remain})
+            remain = 0
+        oldest = next((l['date'] for l in rem_lots if l['date']), None)
+        out.append({'product_id':pid,'name':p['name'],'category':p.get('category',''),
+                    'in_qty':i,'shipped_qty':sh,'on_hand':i-sh,'reserved':rv,'available':i-sh-rv,
+                    'oldest_date':oldest,'age_days':days_between(as_of, oldest) if oldest else None,
+                    'lots':rem_lots})
+    return jsonify({'as_of':as_of,'items':out})
 
 # ─── 出荷先×商品の単価表 ─────────────────────
 @app.route('/api/product-prices', methods=['GET'])
