@@ -3528,7 +3528,7 @@ function drawShipmentList() {
       <td style="text-align:center;white-space:nowrap">${s.delivery_date?.slice(5)||'―'}</td>
       <td style="text-align:left">${esc(chName[s.channel_id]||'')}</td>
       <td style="text-align:left">${esc(s.dest_name||'―')}</td>
-      <td style="text-align:left">${esc(prodName[s.product_id]||'')}</td>
+      <td style="text-align:left">${s.item_type==='freight'?'送料':esc(prodName[s.product_id]||'')}</td>
       <td style="text-align:center">${fmt(s.qty)}</td>
       <td style="text-align:right">¥${fmt(s.unit_price)}</td>
       <td style="text-align:right">¥${fmt(amt)}</td>
@@ -3546,12 +3546,13 @@ function drawShipmentList() {
 }
 
 function prodOptionsHtml(sel) {
-  // 請求先未選択時は選べない。選択時は単価表に単価がある商品のみを候補に出す。
+  // 請求先未選択時は選べない。選択時は単価表に単価がある商品＋送料(税10%)を候補に出す。
   const chSelected = !!document.getElementById('sh-ch')?.value;
   if (!chSelected) return `<option value="">先に請求先を選択</option>`;
   const opts = (cachedProducts||[]).filter(p=>p.active && shipmentPriceMap[p.id] != null)
     .map(p=>`<option value="${p.id}"${sel==p.id?' selected':''}>${esc(p.name)}（¥${fmt(shipmentPriceMap[p.id])}）</option>`).join('');
-  return `<option value="">選択</option>` + (opts || `<option value="" disabled>単価未設定（単価表マスタで設定）</option>`);
+  const freight = `<option value="freight"${sel==='freight'?' selected':''}>送料（税10%）</option>`;
+  return `<option value="">選択</option>` + opts + freight;
 }
 
 function addShipRow() {
@@ -3592,7 +3593,12 @@ function onShipRowProduct(sel) {
   const tr = sel.closest('tr');
   const pid = sel.value;
   const priceInp = tr.querySelector('.sh-price');
-  if (pid && shipmentPriceMap[pid] != null) priceInp.value = shipmentPriceMap[pid];
+  const qtyInp = tr.querySelector('.sh-qty');
+  if (pid === 'freight') {
+    if ((parseInt(qtyInp.value)||0) === 0) qtyInp.value = 1;   // 送料は数量1
+  } else if (pid && shipmentPriceMap[pid] != null) {
+    priceInp.value = shipmentPriceMap[pid];
+  }
   onShipRowChange(sel);
 }
 
@@ -3629,12 +3635,17 @@ async function submitShipments() {
   else if (freeName) { dest_name = freeName; }
   const items = [];
   document.querySelectorAll('#sh-rows tr').forEach(tr => {
-    const pid = +tr.querySelector('.sh-pr').value || null;
+    const sel = tr.querySelector('.sh-pr').value;
     const qty = parseInt(tr.querySelector('.sh-qty').value)||0;
     const price = parseInt(tr.querySelector('.sh-price').value)||0;
-    if (pid && qty > 0) items.push({product_id:pid, qty, unit_price:price});
+    if (sel === 'freight') {
+      if (price > 0) items.push({item_type:'freight', qty: qty||1, unit_price:price});
+    } else {
+      const pid = +sel || null;
+      if (pid && qty > 0) items.push({product_id:pid, qty, unit_price:price});
+    }
   });
-  if (!items.length) { showToast('商品と数量を入力してください', true); return; }
+  if (!items.length) { showToast('商品と数量を入力してください（送料は金額を入力）', true); return; }
   const body = {
     order_date: document.getElementById('sh-date').value,
     delivery_date: document.getElementById('sh-ddate').value,
@@ -3752,7 +3763,10 @@ function renderInvoiceList() {
             <tbody>${lines}</tbody>
             <tfoot>
               <tr><td colspan="5" style="text-align:right">小計（税抜）</td><td style="text-align:right">¥${fmt(iv.subtotal)}</td></tr>
-              <tr><td colspan="5" style="text-align:right">消費税（軽減税率8%）</td><td style="text-align:right">¥${fmt(iv.tax)}</td></tr>
+              ${iv.tax10>0
+                ? `<tr><td colspan="5" style="text-align:right">消費税（軽減税率8%・対象¥${fmt(iv.sub8)}）</td><td style="text-align:right">¥${fmt(iv.tax8)}</td></tr>
+                   <tr><td colspan="5" style="text-align:right">消費税（10%・対象¥${fmt(iv.sub10)}）</td><td style="text-align:right">¥${fmt(iv.tax10)}</td></tr>`
+                : `<tr><td colspan="5" style="text-align:right">消費税（軽減税率8%）</td><td style="text-align:right">¥${fmt(iv.tax)}</td></tr>`}
               <tr><td colspan="5" style="text-align:right;font-weight:700">合計（税込）</td><td style="text-align:right;font-weight:700">¥${fmt(iv.total)}</td></tr>
             </tfoot>
           </table></div>
