@@ -635,7 +635,7 @@ def update_issuer():
     d = request.json or {}; did = dept_id()
     dep = get_dept(); cfg = dep.get('config') or {}
     issuer = dict(cfg.get('issuer') or {})
-    for f in ('name','zip','address','phone','bank','logo_url'):
+    for f in ('name','zip','address','phone','bank','logo_url','reg_no'):
         if f in d: issuer[f] = d[f]
     cfg['issuer'] = issuer
     sb.table('hq_departments').update({'config':cfg}).eq('id',did).execute()
