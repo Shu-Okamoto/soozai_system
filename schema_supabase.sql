@@ -411,6 +411,9 @@ CREATE TABLE IF NOT EXISTS hq_delivery_destinations (
     active        INTEGER DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS hq_delivery_dest_ch_idx ON hq_delivery_destinations (department_id, channel_id);
+-- 納品先の郵便番号・電話番号（再実行安全）
+ALTER TABLE hq_delivery_destinations ADD COLUMN IF NOT EXISTS zip   TEXT DEFAULT '';
+ALTER TABLE hq_delivery_destinations ADD COLUMN IF NOT EXISTS phone TEXT DEFAULT '';
 
 -- 出荷登録に「納品予定日」「納品先」を追加（再実行安全）。
 --   dest_id  : 納品先マスタの参照（単発入力時は NULL）

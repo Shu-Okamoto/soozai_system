@@ -453,14 +453,15 @@ def add_delivery_destination():
         return jsonify({'ok': False, 'error': '請求先と納品先名が必要です'}), 400
     sb.table('hq_delivery_destinations').insert({
         'department_id':did,'channel_id':d['channel_id'],'name':d['name'].strip(),
-        'address':d.get('address','') or '','sort_order':d.get('sort_order',0) or 0
+        'address':d.get('address','') or '','zip':d.get('zip','') or '','phone':d.get('phone','') or '',
+        'sort_order':d.get('sort_order',0) or 0
     }).execute()
     return jsonify({'ok': True})
 
 @app.route('/api/delivery-destinations/<int:ddid>', methods=['PUT'])
 def update_delivery_destination(ddid):
     d = request.json or {}; did = dept_id()
-    upd = {f: d[f] for f in ('name','address','sort_order','active','channel_id') if f in d}
+    upd = {f: d[f] for f in ('name','address','zip','phone','sort_order','active','channel_id') if f in d}
     if upd:
         sb.table('hq_delivery_destinations').update(upd).eq('id',ddid).eq('department_id',did).execute()
     return jsonify({'ok': True})

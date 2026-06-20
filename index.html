@@ -3927,8 +3927,10 @@ async function loadDeliveryDests() {
   const dests = await fetch(`${API}/delivery-destinations?channel_id=${ch}&include_inactive=1`).then(r=>r.json()).catch(()=>[]);
   const rows = dests.map(d=>`
     <tr>
-      <td><input type="text" value="${esc(d.name)}"    id="dd-n${d.id}" style="width:160px"></td>
-      <td><input type="text" value="${esc(d.address||'')}" id="dd-a${d.id}" style="width:240px"></td>
+      <td><input type="text" value="${esc(d.name)}"    id="dd-n${d.id}" style="width:140px"></td>
+      <td><input type="text" value="${esc(d.zip||'')}"   id="dd-z${d.id}" style="width:80px"></td>
+      <td><input type="text" value="${esc(d.address||'')}" id="dd-a${d.id}" style="width:220px"></td>
+      <td><input type="text" value="${esc(d.phone||'')}" id="dd-p${d.id}" style="width:110px"></td>
       <td><input type="number" value="${d.sort_order||0}" id="dd-o${d.id}" style="width:54px;text-align:center"></td>
       <td>
         <button class="btn btn-primary btn-sm" onclick="updateDeliveryDest(${d.id})">更新</button>
@@ -3939,16 +3941,18 @@ async function loadDeliveryDests() {
     <div class="card mb-16">
       <div class="card-header"><span class="card-title">納品先一覧</span><span class="text-muted" style="font-size:12px">${dests.length}件</span></div>
       <div class="table-wrap"><table>
-        <thead><tr><th style="text-align:left;min-width:160px">納品先名</th><th style="text-align:left">住所</th><th>順</th><th></th></tr></thead>
-        <tbody>${rows||'<tr><td colspan="4" class="text-muted text-center" style="padding:16px">登録なし</td></tr>'}</tbody>
+        <thead><tr><th style="text-align:left;min-width:140px">納品先名</th><th>郵便番号</th><th style="text-align:left">住所</th><th>電話番号</th><th>順</th><th></th></tr></thead>
+        <tbody>${rows||'<tr><td colspan="6" class="text-muted text-center" style="padding:16px">登録なし</td></tr>'}</tbody>
       </table></div>
     </div>
     <div class="card">
       <div class="card-header"><span class="card-title">納品先を追加</span></div>
       <div class="card-body">
-        <div class="form-grid" style="grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">
+        <div class="form-grid" style="grid-template-columns:repeat(4,1fr) auto;gap:10px;align-items:end">
           <div class="form-group"><label>納品先名 <span style="color:var(--danger)">*</span></label><input type="text" id="dd-new-n"></div>
+          <div class="form-group"><label>郵便番号</label><input type="text" id="dd-new-z" placeholder="123-4567"></div>
           <div class="form-group"><label>住所</label><input type="text" id="dd-new-a"></div>
+          <div class="form-group"><label>電話番号</label><input type="text" id="dd-new-p"></div>
           <button class="btn btn-primary" onclick="addDeliveryDest()">＋ 追加</button>
         </div>
       </div>
@@ -3960,7 +3964,10 @@ async function addDeliveryDest() {
   const name = document.getElementById('dd-new-n').value.trim();
   if (!name) { showToast('納品先名を入力してください', true); return; }
   const r = await fetch(`${API}/delivery-destinations`, {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({channel_id:+ch, name, address:document.getElementById('dd-new-a').value.trim()})}).then(r=>r.json()).catch(()=>null);
+    body: JSON.stringify({channel_id:+ch, name,
+      zip:document.getElementById('dd-new-z').value.trim(),
+      address:document.getElementById('dd-new-a').value.trim(),
+      phone:document.getElementById('dd-new-p').value.trim()})}).then(r=>r.json()).catch(()=>null);
   if (r?.ok) { showToast('追加しました'); loadDeliveryDests(); } else showToast(r?.error||'追加失敗', true);
 }
 
@@ -3968,7 +3975,9 @@ async function updateDeliveryDest(id) {
   const name = document.getElementById('dd-n'+id).value.trim();
   if (!name) { showToast('納品先名を入力してください', true); return; }
   const r = await fetch(`${API}/delivery-destinations/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({name, address:document.getElementById('dd-a'+id).value.trim(),
+    body: JSON.stringify({name, zip:document.getElementById('dd-z'+id).value.trim(),
+      address:document.getElementById('dd-a'+id).value.trim(),
+      phone:document.getElementById('dd-p'+id).value.trim(),
       sort_order:parseInt(document.getElementById('dd-o'+id).value)||0, active:1})}).then(r=>r.json()).catch(()=>null);
   if (r?.ok) showToast('更新しました'); else showToast('更新失敗', true);
 }
