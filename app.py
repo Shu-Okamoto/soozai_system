@@ -693,10 +693,10 @@ def get_invoices():
     out.sort(key=lambda x:x['channel_name'])
     return jsonify(out)
 
-# ─── 出荷ベースの売上分析（漬物部）──────────────
+# ─── 売上分析（納品予定日ベース・漬物部）──────
 @app.route('/api/shipment-analysis', methods=['GET'])
 def shipment_analysis():
-    """月内の出荷（登録日ベース）を、日別明細＋取引先別／商品別／納品先別で集計。"""
+    """月内の出荷を納品予定日ベースで、日別明細＋取引先別／商品別／納品先別で集計。"""
     did = dept_id()
     month = request.args.get('month')
     if not month:
@@ -705,7 +705,7 @@ def shipment_analysis():
     last = calendar.monthrange(y, m)[1]
     start, end = f'{month}-01', f'{month}-{last:02d}'
     ships = sb.table('hq_shipments').select('*').eq('department_id',did)\
-        .gte('order_date',start).lte('order_date',end).order('order_date').order('id').execute().data
+        .gte('delivery_date',start).lte('delivery_date',end).order('delivery_date').order('id').execute().data
     prods = {p['id']:p['name'] for p in sb.table('hq_products').select('id,name').eq('department_id',did).execute().data}
     chans = {c['id']:c['name'] for c in sb.table('hq_channels').select('id,name').eq('department_id',did).execute().data}
     lines = []
@@ -726,7 +726,7 @@ def shipment_analysis():
         def acc(dct, key, name):
             e = dct.setdefault(key, {'name':name,'qty':0,'amount':0})
             e['qty'] += qty; e['amount'] += amt
-        d = s['order_date']
+        d = s.get('delivery_date') or ''
         bd = by_date.setdefault(d, {'qty':0,'amount':0}); bd['qty']+=qty; bd['amount']+=amt
         acc(by_ch, cid, chans.get(cid,''))
         acc(by_pr, pkey, pname)
