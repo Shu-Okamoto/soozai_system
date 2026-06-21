@@ -170,7 +170,7 @@
       <div class="nav-label">分析</div>
       <button class="nav-item" onclick="showPage('monthly')" id="nav-monthly">📈 月次サマリ</button>
       <button class="nav-item" onclick="showPage('yearly')"  id="nav-yearly">📈 年次サマリ</button>
-      <button class="nav-item" onclick="showPage('shipanalysis')" id="nav-shipanalysis">🚚 出荷分析</button>
+      <button class="nav-item" onclick="showPage('shipanalysis')" id="nav-shipanalysis">📊 売上分析</button>
     </div>
     <div class="nav-group admin-only" id="navgroup-data">
       <div class="nav-label">データ管理</div>
@@ -579,7 +579,7 @@ function showPage(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:(deptFeatures().production?'請求先マスタ':'出荷先マスタ'),orderproducts:'発注商品マスタ',suppliers:'業者マスタ',pricelist:'単価表マスタ',deliverydests:'納品先マスタ',issuer:'自社情報マスタ',members:'メンバーマスタ',production:'製造日報',inventory:'在庫',shipments:'出荷登録',invoice:'請求書',shipanalysis:'出荷分析',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成',import:'売上実績取込'};
+  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:(deptFeatures().production?'請求先マスタ':'出荷先マスタ'),orderproducts:'発注商品マスタ',suppliers:'業者マスタ',pricelist:'単価表マスタ',deliverydests:'納品先マスタ',issuer:'自社情報マスタ',members:'メンバーマスタ',production:'製造日報',inventory:'在庫',shipments:'出荷登録',invoice:'請求書',shipanalysis:'売上分析',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成',import:'売上実績取込'};
   document.getElementById('page-title').textContent = titles[page]||'';
   ({plan:renderPlanPage,actual:renderActualPage,report:renderReportPage,
     menu:renderMenuPage,order:renderOrderPage,checklist:renderChecklistPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,orderproducts:renderOrderProductsPage,suppliers:renderSuppliersPage,pricelist:renderPriceListPage,deliverydests:renderDeliveryDestPage,issuer:renderIssuerPage,members:renderMembersPage,
@@ -3968,15 +3968,15 @@ async function renderShipAnalysisPage() {
     .map(([k,label])=>`<button onclick="shipAnalysisView='${k}';drawShipAnalysis()"
       class="btn btn-sm ${k===shipAnalysisView?'btn-primary':'btn-secondary'}" style="margin-right:6px">${label}</button>`).join('');
   document.getElementById('content').innerHTML = `
-    <div class="print-header"><h2>漬物部 出荷分析</h2><p>${ym}</p></div>
+    <div class="print-header"><h2>漬物部 売上分析</h2><p>${ym}</p></div>
     <div class="no-print" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
       <input type="month" value="${ym}" onchange="currentDate=this.value+'-01';document.getElementById('global-date').value=currentDate;renderShipAnalysisPage()" style="font-size:13px">
-      <span style="font-size:13px;color:var(--text2)">登録日ベース・金額＝数量×単価（税抜）</span>
+      <span style="font-size:13px;color:var(--text2)">納品日（納品予定日）ベース・金額＝数量×単価（税抜）</span>
       <div style="margin-left:auto"><button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 印刷</button></div>
     </div>
     <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
-      <div class="kpi"><div class="kpi-label">出荷金額計（税抜）</div><div class="kpi-value green">¥${fmt(data?.total_amount||0)}</div></div>
-      <div class="kpi"><div class="kpi-label">出荷数量計</div><div class="kpi-value">${fmt(data?.total_qty||0)}</div></div>
+      <div class="kpi"><div class="kpi-label">売上金額計（税抜）</div><div class="kpi-value green">¥${fmt(data?.total_amount||0)}</div></div>
+      <div class="kpi"><div class="kpi-label">売上数量計</div><div class="kpi-value">${fmt(data?.total_qty||0)}</div></div>
       <div class="kpi"><div class="kpi-label">明細件数</div><div class="kpi-value">${(data?.lines||[]).length}</div><div class="kpi-sub">件</div></div>
     </div>
     <div class="no-print" style="margin:12px 0">${tabs}</div>
@@ -3999,14 +3999,13 @@ function drawShipAnalysis() {
   const data = window._shipAnalysis;
   const body = document.getElementById('ship-analysis-body');
   if (!data || !(data.lines||[]).length) {
-    body.innerHTML = `<div class="text-muted text-center" style="padding:40px">この月の出荷はありません。</div>`;
+    body.innerHTML = `<div class="text-muted text-center" style="padding:40px">この月（納品予定日）の売上はありません。</div>`;
     return;
   }
   const v = shipAnalysisView;
   if (v === 'date') {
     const rows = data.lines.map(l=>`
       <tr>
-        <td>${(l.order_date||'').slice(5)}</td>
         <td>${(l.delivery_date||'').slice(5)||'―'}</td>
         <td style="text-align:left">${esc(l.channel_name)}</td>
         <td style="text-align:left">${esc(l.dest_name||'―')}</td>
@@ -4017,12 +4016,12 @@ function drawShipAnalysis() {
         <td class="text-center">${l.status==='shipped'?'出荷済':'登録済'}</td>
       </tr>`).join('');
     body.innerHTML = `
-      <div class="card"><div class="card-header"><span class="card-title">日別明細</span></div>
+      <div class="card"><div class="card-header"><span class="card-title">日別明細（納品日）</span></div>
       <div class="table-wrap"><table>
-        <thead><tr><th>登録日</th><th>納品予定</th><th style="text-align:left">取引先</th><th style="text-align:left">納品先</th><th style="text-align:left">商品</th><th>数量</th><th>単価</th><th>金額</th><th>状態</th></tr></thead>
+        <thead><tr><th>納品日</th><th style="text-align:left">取引先</th><th style="text-align:left">納品先</th><th style="text-align:left">商品</th><th>数量</th><th>単価</th><th>金額</th><th>状態</th></tr></thead>
         <tbody>${rows}</tbody>
         <tfoot><tr class="fw-bold" style="background:var(--surface2)">
-          <td class="left" colspan="5">合計</td>
+          <td class="left" colspan="4">合計</td>
           <td class="text-right">${fmt(data.total_qty)}</td><td></td>
           <td class="text-right">¥${fmt(data.total_amount)}</td><td></td>
         </tr></tfoot>
