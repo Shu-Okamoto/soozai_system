@@ -3547,9 +3547,15 @@ function drawShipmentList() {
       const ad=shipGroups[a].ddate||'￿', bd=shipGroups[b].ddate||'￿';
       return ad<bd?-1:(ad>bd?1:0);
     });
-    const body = keys.map(k=>{
+    const body = keys.map((k,gi)=>{
       const g = shipGroups[k];
       const detail = g.items.map(s=>`${s.item_type==='freight'?'送料':esc(prodName[s.product_id]||'')}×${fmt(s.qty)}`).join('、');
+      const itemRows = g.items.map(s=>`
+        <div style="display:flex;align-items:center;gap:8px;padding:2px 0">
+          <span style="flex:1">${s.item_type==='freight'?'送料':esc(prodName[s.product_id]||'')} ×${fmt(s.qty)}　¥${fmt((s.qty||0)*(s.unit_price||0))}</span>
+          <button class="btn btn-secondary btn-sm" onclick="editShipment(${s.id})">修正</button>
+          <button class="btn btn-secondary btn-sm" style="color:var(--danger)" onclick="deleteShipment(${s.id})">削除</button>
+        </div>`).join('');
       return `<tr style="background:rgba(255,193,7,.06)">
         <td class="no-print" style="text-align:center"><input type="checkbox" class="ship-grp-cb" value="${esc(k)}"></td>
         <td style="text-align:center;white-space:nowrap">${(g.ddate||'').slice(5)||'―'}</td>
@@ -3559,9 +3565,11 @@ function drawShipmentList() {
         <td style="text-align:right">¥${fmt(g.amount)}</td>
         <td class="no-print" style="white-space:nowrap">
           <button class="btn btn-primary btn-sm" onclick="shipGroup('${esc(k)}')">出荷</button>
+          <button class="btn btn-secondary btn-sm" style="margin-left:4px" onclick="document.getElementById('grp${gi}').classList.toggle('hidden')">修正</button>
           <button class="btn btn-secondary btn-sm" style="margin-left:4px;color:var(--danger)" onclick="deleteShipGroup('${esc(k)}')">削除</button>
         </td>
-      </tr>`;
+      </tr>
+      <tr id="grp${gi}" class="hidden no-print"><td colspan="7" style="background:var(--surface2);padding:6px 12px">${itemRows}</td></tr>`;
     }).join('');
     if (tb) {
       tb.closest('table').querySelector('thead').innerHTML = `<tr>
@@ -3598,6 +3606,7 @@ function drawShipmentList() {
         : '<span style="color:#b8860b;font-weight:700">登録済</span>'}</td>
       <td class="no-print" style="white-space:nowrap">
         ${shipped ? '' : `<button class="btn btn-primary btn-sm" onclick="confirmShip(${s.id})">出荷</button>`}
+        <button class="btn btn-secondary btn-sm" style="margin-left:4px" onclick="editShipment(${s.id})">修正</button>
         <button class="btn btn-secondary btn-sm" style="margin-left:4px;color:var(--danger)" onclick="deleteShipment(${s.id})">削除</button>
       </td>
     </tr>`;
@@ -3772,6 +3781,76 @@ async function deleteShipment(id) {
   if (!confirm('この出荷登録を削除しますか？')) return;
   const r = await fetch(`${API}/shipments/${id}`, {method:'DELETE'}).then(r=>r.json()).catch(()=>null);
   if (r?.ok) { showToast('削除しました'); renderShipmentsPage(); } else showToast('削除失敗', true);
+}
+
+// ── 出荷登録の修正（出荷日・各項目を編集）──
+function editShipment(id) {
+  const s = (window._shipList||[]).find(x=>x.id===id);
+  if (!s) return;
+  const isFreight = s.item_type === 'freight';
+  const chOpts = (cachedChannels||[]).filter(c=>c.active)
+    .map(c=>`<option value="${c.id}"${c.id===s.channel_id?' selected':''}>${esc(c.name)}</option>`).join('');
+  const prOpts = (cachedProducts||[]).filter(p=>p.active)
+    .map(p=>`<option value="${p.id}"${p.id===s.product_id?' selected':''}>${esc(p.name)}</option>`).join('');
+  const ov = document.createElement('div');
+  ov.id = 'ship-edit-overlay';
+  ov.style = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML = `
+    <div class="card" style="max-width:460px;width:100%;max-height:90vh;overflow:auto">
+      <div class="card-header"><span class="card-title">出荷の修正</span></div>
+      <div class="card-body">
+        <div class="form-group"><label>登録日</label><input type="date" id="ed-order" value="${s.order_date||''}"></div>
+        <div class="form-group"><label>納品予定日</label><input type="date" id="ed-ddate" value="${s.delivery_date||''}"></div>
+        <div class="form-group"><label>請求先</label><select id="ed-ch">${chOpts}</select></div>
+        <div class="form-group"><label>納品先</label><input type="text" id="ed-dest" value="${esc(s.dest_name||'')}" placeholder="（なし）"></div>
+        <div class="form-group"><label>商品</label>${isFreight?'<input type="text" value="送料（税10%）" disabled>':`<select id="ed-pr">${prOpts}</select>`}</div>
+        <div style="display:flex;gap:10px">
+          <div class="form-group" style="flex:1"><label>数量</label><input type="number" id="ed-qty" min="0" value="${s.qty||0}"></div>
+          <div class="form-group" style="flex:1"><label>単価</label><input type="number" id="ed-price" min="0" value="${s.unit_price||0}"></div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <div class="form-group" style="flex:1"><label>状態</label>
+            <select id="ed-status">
+              <option value="registered"${s.status!=='shipped'?' selected':''}>登録済</option>
+              <option value="shipped"${s.status==='shipped'?' selected':''}>出荷済</option>
+            </select></div>
+          <div class="form-group" style="flex:1"><label>出荷日</label><input type="date" id="ed-shipped" value="${s.shipped_date||''}"></div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">
+          <button class="btn btn-secondary" onclick="closeShipmentEdit()">キャンセル</button>
+          <button class="btn btn-primary" onclick="saveShipmentEdit(${id})">💾 保存</button>
+        </div>
+      </div>
+    </div>`;
+  ov.addEventListener('click', e=>{ if(e.target===ov) closeShipmentEdit(); });
+  document.body.appendChild(ov);
+}
+
+function closeShipmentEdit() {
+  document.getElementById('ship-edit-overlay')?.remove();
+}
+
+async function saveShipmentEdit(id) {
+  const g = sid => document.getElementById(sid);
+  const status = g('ed-status').value;
+  let shipped = g('ed-shipped').value;
+  if (status === 'shipped' && !shipped) {
+    const t = new Date(); shipped = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+  }
+  if (status === 'registered') shipped = '';   // 登録済に戻す場合は出荷日をクリア
+  const body = {
+    order_date: g('ed-order').value,
+    delivery_date: g('ed-ddate').value,
+    channel_id: +g('ed-ch').value,
+    dest_name: g('ed-dest').value.trim(),
+    qty: parseInt(g('ed-qty').value)||0,
+    unit_price: parseInt(g('ed-price').value)||0,
+    status, shipped_date: shipped,
+  };
+  if (g('ed-pr')) body.product_id = +g('ed-pr').value;
+  const r = await fetch(`${API}/shipments/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('修正しました'); closeShipmentEdit(); renderShipmentsPage(); } else showToast('修正失敗', true);
 }
 
 // ── 請求書（請求先×月、出荷済を集計・軽減税率8%・税込）──
