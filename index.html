@@ -929,7 +929,7 @@ function updateRiceCalc() {
     if (sukorokuPids.has(pid)) {
       sukorokuTotal += v;
       const ex = sukorokuExtraByPid.get(pid) || {};
-      if (ex.salad)   saladTotal   += v;
+      if (ex.salad)   bentoTotal   += v;   // サラダのチップは bentoTotal を表示
       if (ex.tenpura) tenpuraTotal += v;
       if (ex.tamago)  tamagoTotal  += v;
       return;
@@ -954,7 +954,7 @@ function updateRiceCalc() {
     if (name.includes('助六')) {
       sukorokuTotal += v;
       const ex = sukorokuExtras(name);
-      if (ex.salad)   saladTotal   += v;
+      if (ex.salad)   bentoTotal   += v;   // サラダのチップは bentoTotal を表示
       if (ex.tenpura) tenpuraTotal += v;
       if (ex.tamago)  tamagoTotal  += v;
       return;
