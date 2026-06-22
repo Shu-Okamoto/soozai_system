@@ -878,6 +878,17 @@ function updateMochiCalc() {
   Object.entries(out).forEach(([id,v]) => { set(id,v); set(id+'-p',v); });
 }
 
+// 助六の種類ごとに加算する付け合わせを返す。
+//  1200円助六／助六デラックス … 助六＋サラダ＋天ぷら＋玉子
+//  助六弁当 … 助六＋サラダ＋天ぷら
+//  助六セット（およびその他の助六） … 助六のみ
+function sukorokuExtras(name) {
+  name = name || '';
+  if (name.includes('デラックス') || name.includes('1200')) return {salad:true, tenpura:true, tamago:true};
+  if (name.includes('助六弁当')) return {salad:true, tenpura:true, tamago:false};
+  return {salad:false, tenpura:false, tamago:false};   // 助六セット等は助六のみ
+}
+
 // 各種合計をリアルタイム更新（部署で振り分け）
 function updateRiceCalc() {
   if (currentDept === 'mochi') { updateMochiCalc(); return; }
@@ -905,14 +916,24 @@ function updateRiceCalc() {
   const sukorokuPids = new Set(cachedProducts.filter(p=>
     (p.category==='弁当' || p.category==='寿司') && p.name.includes('助六')
   ).map(p=>p.id));
+  const sukorokuExtraByPid = new Map(cachedProducts.filter(p=>
+    (p.category==='弁当' || p.category==='寿司') && p.name.includes('助六')
+  ).map(p=>[p.id, sukorokuExtras(p.name)]));
 
   let riceTotal=0, sansyokuTotal=0, chirashiTotal=0, tamagoTotal=0, saladTotal=0, bentoTotal=0, tenpuraTotal=0, nishimeTotal=0, sukorokuTotal=0;
   document.querySelectorAll('input[type="number"][data-pid][data-cid]').forEach(inp => {
     const pid = parseInt(inp.dataset.pid);
     const v   = parseInt(inp.value) || 0;
     if (!v) return;
-    // 助六：他には一切加算せず、助六チップにのみ計上
-    if (sukorokuPids.has(pid)) { sukorokuTotal += v; return; }
+    // 助六：助六チップに計上し、種類に応じてサラダ／天ぷら／玉子も加算
+    if (sukorokuPids.has(pid)) {
+      sukorokuTotal += v;
+      const ex = sukorokuExtraByPid.get(pid) || {};
+      if (ex.salad)   saladTotal   += v;
+      if (ex.tenpura) tenpuraTotal += v;
+      if (ex.tamago)  tamagoTotal  += v;
+      return;
+    }
     if (ricePids.has(pid))     riceTotal     += v;
     if (sansyokuPids.has(pid)) sansyokuTotal += v;
     if (chirashiPids.has(pid)) chirashiTotal += v;
@@ -929,8 +950,15 @@ function updateRiceCalc() {
     const v     = Math.round(o.quantity || 0);
     const price = Math.round(Number(o.price) || 0);
     if (!v) return;
-    // 助六：他には一切加算せず、助六チップにのみ計上
-    if (name.includes('助六')) { sukorokuTotal += v; return; }
+    // 助六：助六チップに計上し、種類に応じてサラダ／天ぷら／玉子も加算
+    if (name.includes('助六')) {
+      sukorokuTotal += v;
+      const ex = sukorokuExtras(name);
+      if (ex.salad)   saladTotal   += v;
+      if (ex.tenpura) tenpuraTotal += v;
+      if (ex.tamago)  tamagoTotal  += v;
+      return;
+    }
     // 取込品の単価が500円未満は何も加算しない（500円ちょうどは加算対象）
     if (price < 500) return;
     const isSansyoku = name.includes('三色');
