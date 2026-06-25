@@ -3969,7 +3969,7 @@ function renderInvoiceList() {
               <h2 style="font-size:22px;font-weight:700;margin-bottom:10px">請求書</h2>
               ${iv.channel_zip?`<div style="font-size:12px;color:var(--text2)">〒${esc(iv.channel_zip)}</div>`:''}
               ${iv.channel_address?`<div style="font-size:12px;color:var(--text2)">${esc(iv.channel_address)}</div>`:''}
-              <div style="font-size:16px;font-weight:600;margin-top:4px">${esc(iv.channel_name)} 御中</div>
+              <div style="font-size:24px;font-weight:600;margin-top:4px">${esc(iv.channel_name)} 御中</div>
               <div style="font-size:13px;color:var(--text2);margin-top:6px">${y}年${m}月分（月末締め）／発行日：${issueDate}</div>
             </div>
             ${issuerBlock}
