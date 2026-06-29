@@ -1128,6 +1128,38 @@ def save_checklist():
         sb.table('hq_checklist_records').insert(rows).execute()
     return jsonify({'ok': True})
 
+# ─── 衛生作業リスト（週1/月2/月1の実施記録）──────────────
+# hq_checklist_records を流用。period_type='sanitation'、period_key=実施日 'YYYY-MM-DD'。
+# GET は項目ごとの最新実施日を返す（{item_key: {date, by}}）。
+@app.route('/api/sanitation', methods=['GET'])
+def get_sanitation():
+    r = (sb.table('hq_checklist_records')
+           .select('item_key,period_key,checked_by')
+           .eq('department_id', dept_id())
+           .eq('period_type', 'sanitation')
+           .order('period_key', desc=True).execute())
+    latest = {}
+    for row in (r.data or []):
+        k = row['item_key']
+        if k not in latest:
+            latest[k] = {'date': row['period_key'], 'by': row.get('checked_by', '')}
+    return jsonify(latest)
+
+@app.route('/api/sanitation', methods=['POST'])
+def do_sanitation():
+    d   = request.json
+    did = dept_id()
+    item = d['item_key']
+    by   = d.get('checked_by', '')
+    day  = d.get('date') or today_jst().isoformat()
+    sb.table('hq_checklist_records').delete().eq('department_id', did) \
+        .eq('period_type', 'sanitation').eq('period_key', day).eq('item_key', item).execute()
+    sb.table('hq_checklist_records').insert({
+        'period_type': 'sanitation', 'period_key': day, 'item_key': item,
+        'checked': True, 'checked_by': by, 'department_id': did
+    }).execute()
+    return jsonify({'ok': True, 'date': day})
+
 # ─── シフト ────────────────────────────────────
 @app.route('/api/shifts', methods=['GET'])
 def get_shifts():
