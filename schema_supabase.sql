@@ -126,9 +126,12 @@ CREATE TABLE IF NOT EXISTS hq_checklist_records (
     item_key    TEXT NOT NULL,
     checked     BOOLEAN DEFAULT TRUE,
     checked_by  TEXT DEFAULT '',
+    note        TEXT DEFAULT '',   -- 温度などの記録値（冷蔵庫・冷凍庫の庫内温度入力など）
     created_at  TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (period_type, period_key, item_key)
 );
+-- 既存環境向け：note 列の追加（庫内温度の記録に使用）
+ALTER TABLE hq_checklist_records ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '';
 CREATE INDEX IF NOT EXISTS hq_checklist_records_period_idx
     ON hq_checklist_records (period_type, period_key);
 -- 初期データ（弁当部のカテゴリ/サブカテゴリ）は Phase 2 のユニーク制約変更後に投入する
