@@ -1122,8 +1122,16 @@ def save_checklist():
     pk = d['period_key']
     by = d.get('checked_by','')
     sb.table('hq_checklist_records').delete().eq('department_id',did).eq('period_type',pt).eq('period_key',pk).execute()
-    rows = [{'period_type':pt,'period_key':pk,'item_key':it['item_key'],'checked':True,'checked_by':by,'department_id':did}
-            for it in d.get('items',[]) if it.get('checked')]
+    rows = []
+    for it in d.get('items', []):
+        note = (it.get('note') or '').strip()
+        if not (it.get('checked') or note):
+            continue
+        row = {'period_type':pt,'period_key':pk,'item_key':it['item_key'],
+               'checked':bool(it.get('checked')) or bool(note),'checked_by':by,'department_id':did}
+        if note:
+            row['note'] = note   # 温度などの記録値。note 列が無い環境では値入力時のみ列を要求する
+        rows.append(row)
     if rows:
         sb.table('hq_checklist_records').insert(rows).execute()
     return jsonify({'ok': True})
