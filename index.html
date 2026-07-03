@@ -445,12 +445,12 @@ async function initData() {
     showPage('production');
     return;
   }
-  // メンバーは当日の出荷予定から実績を初期生成して実績入力へ（＝「実績入力へ」を押した状態）。
-  // 管理者は従来どおり出荷指示書を初期表示。
+  // メンバーは当日の出荷予定から実績を初期生成して当日の実績入力へ。
+  // 管理者は当日の調整保存を開けないため、翌日の出荷指示書を初期表示。
   if (currentRole === 'admin') {
-    showPage('plan');
+    goToNextDayPlan();
   } else {
-    await goToActual(currentDate);
+    await goToActual(realToday());
   }
 }
 
@@ -587,6 +587,29 @@ function onDateChange() {
   showPage(currentPage);
 }
 
+// 当日（実機の今日）。currentDate はピッカーで変わるため、日付判定は常にこれを使う。
+function realToday() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function setGlobalDate(dateStr) {
+  currentDate = dateStr;
+  const el = document.getElementById('global-date');
+  if (el) el.value = dateStr;
+}
+// 実績入力は当日のみ。当日の実績入力へ移動する。
+function goToTodayActual() {
+  const today = realToday();
+  setGlobalDate(today);
+  goToActual(today);
+}
+// 出荷指示書（調整保存）は翌日以降のみ。翌日の指示書へ移動する。
+function goToNextDayPlan() {
+  const d = new Date(realToday()); d.setDate(d.getDate()+1);
+  setGlobalDate(d.toISOString().slice(0,10));
+  showPage('plan');
+}
+
 function showPage(page) {
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
@@ -641,6 +664,24 @@ function getWeekDays(mondayStr) {
 let planViewMode = 'day'; // 'day' | 'week'
 
 async function renderPlanPage() {
+  // 出荷指示書（調整保存）は翌日以降のみ。当日・過去日は開けない（管理者も不可）。
+  // 週間予定数入力(adminplan)は従来どおり任意の週・日を編集可。
+  if (currentPage === 'plan') {
+    const today = realToday();
+    if (currentDate <= today) {
+      document.getElementById('content').innerHTML = `
+        <div class="card"><div class="card-body" style="text-align:center;padding:48px 24px">
+          <div style="font-size:40px;margin-bottom:12px">📋</div>
+          <div style="font-size:15px;line-height:1.7;margin-bottom:20px">
+            出荷指示書（調整保存）は<strong>翌日以降</strong>の日付で作成します。<br>
+            当日（${today}）の数量調整は「出荷実績入力」で行ってください。<br>
+            選択中の日付：<strong>${currentDate}</strong>
+          </div>
+          <button class="btn btn-primary" onclick="goToNextDayPlan()">翌日の出荷指示書を開く</button>
+        </div></div>`;
+      return;
+    }
+  }
   setLoading();
   const mondayStr = getMondayOf(currentDate);
   const days = getWeekDays(mondayStr);
@@ -784,7 +825,7 @@ async function renderPlanPage() {
     <div class="no-print btn-group mb-16">
       ${isAdmin ? `<button class="btn btn-secondary btn-sm" onclick="shiftPlanWeek(-7)">◀ 前の週へ</button>
       <button class="btn btn-secondary btn-sm" onclick="shiftPlanWeek(7)">次の週へ ▶</button>` : ''}
-      <button class="btn btn-primary btn-sm" onclick="savePlans(${isAdmin ? '' : `'${todayDate}'`})">💾 ${isAdmin ? '保存' : '調整保存（実績へ反映）'}</button>
+      <button class="btn btn-primary btn-sm" onclick="savePlans()">💾 ${isAdmin ? '保存' : '調整保存'}</button>
       ${isAdmin ? `<div style="display:flex;gap:6px;margin:0 8px;background:var(--surface2);border-radius:6px;padding:3px;border:1px solid var(--border)">
         <button class="btn btn-sm ${isDayMode?'btn-primary':'btn-secondary'}" style="padding:3px 12px" onclick="planViewMode='day';renderPlanPage()">一日</button>
         <button class="btn btn-sm ${!isDayMode?'btn-primary':'btn-secondary'}" style="padding:3px 12px" onclick="planViewMode='week';renderPlanPage()">週間</button>
@@ -792,7 +833,6 @@ async function renderPlanPage() {
       ${calcChipsScreen()}
       <div style="margin-left:auto;display:flex;gap:8px">
         ${isAdmin ? `<button class="btn btn-secondary btn-sm" onclick="copyLastWeek('${days[0]}')">📋 前の週の予定をコピー</button>` : ''}
-        ${isAdmin ? '' : `<button class="btn btn-warn btn-sm" onclick="saveAndGoToActual('${todayDate}')">✏️ ${todayLabel}の実績入力へ（保存して移動）</button>`}
         <button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 ${todayLabel}を印刷</button>
       </div>
     </div>
@@ -1023,9 +1063,10 @@ function updateRowTotal(inp) {
 
 let dirty = false;
 
-// reflectDate を渡すと、計画保存後にその日の出荷実績入力へ数を反映する（空欄のみ補完・手入力は残す）。
-// 出荷指示書（調整保存）から呼ばれる。週間予定数入力(adminplan)からは引数なしで保存のみ。
-async function savePlans(reflectDate) {
+// 出荷計画（出荷指示書・週間予定数入力）を保存する。
+// 出荷指示書は翌日以降の計画のみ扱うため、ここでは実績への即時反映は行わない。
+// 計画は、その日が当日になり実績入力を開いた時点で goToActual が実績へ初期反映する。
+async function savePlans() {
   const inputs = document.querySelectorAll('#plan-table input[type="number"]');
   const items = [];
   const dateSet = new Set();
@@ -1038,23 +1079,8 @@ async function savePlans(reflectDate) {
     body:JSON.stringify({dates:[...dateSet], items})}).then(r=>r.json()).catch(()=>null);
   if (!r?.ok) { showToast('保存失敗',true); return false; }
   dirty=false;
-  if (reflectDate) {
-    await fetch(`${API}/shipping-actuals/init`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({date:reflectDate, only_empty:true})}).then(r=>r.json()).catch(()=>{});
-    showToast(`${items.length}件保存し、実績入力へ反映しました`);
-  } else {
-    showToast(`${items.length}件保存しました`);
-  }
+  showToast(`${items.length}件保存しました`);
   return true;
-}
-
-// 出荷指示書の「実績入力へ」ボタン：計画を保存→その日の実績へ反映（空欄のみ補完）→実績入力画面へ遷移。
-async function saveAndGoToActual(date) {
-  const ok = await savePlans(date);
-  if (!ok) return;            // 保存失敗時は遷移しない
-  document.getElementById('global-date').value = date;
-  currentDate = date;
-  showPage('actual');
 }
 
 async function copyLastWeek(dstFrom) {
@@ -1094,6 +1120,20 @@ async function goToActual(date) {
 // 出荷実績入力（マトリクス表示）
 // ═══════════════════════════════════════════════
 async function renderActualPage() {
+  // 出荷実績入力は当日のみ（管理者・メンバー共通。過去日・翌日とも不可）。
+  const today = realToday();
+  if (currentDate !== today) {
+    document.getElementById('content').innerHTML = `
+      <div class="card"><div class="card-body" style="text-align:center;padding:48px 24px">
+        <div style="font-size:40px;margin-bottom:12px">🗓</div>
+        <div style="font-size:15px;line-height:1.7;margin-bottom:20px">
+          出荷実績入力は<strong>当日（${today}）のみ</strong>入力できます。<br>
+          選択中の日付：<strong>${currentDate}</strong>
+        </div>
+        <button class="btn btn-primary" onclick="goToTodayActual()">当日の実績入力を開く</button>
+      </div></div>`;
+    return;
+  }
   setLoading();
   const date = currentDate;
   const mondayStr = getMondayOf(date);
