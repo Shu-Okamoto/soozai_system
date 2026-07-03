@@ -1620,6 +1620,20 @@ async function generateReport(date) {
 // 売上日報
 // ═══════════════════════════════════════════════
 async function renderReportPage() {
+  // 売上日報は過去〜当日まで表示可。翌日以降は表示しない。
+  const today = realToday();
+  if (currentDate > today) {
+    document.getElementById('content').innerHTML = `
+      <div class="card"><div class="card-body" style="text-align:center;padding:48px 24px">
+        <div style="font-size:40px;margin-bottom:12px">📊</div>
+        <div style="font-size:15px;line-height:1.7;margin-bottom:20px">
+          売上日報は<strong>当日（${today}）まで</strong>表示できます。翌日以降は表示できません。<br>
+          選択中の日付：<strong>${currentDate}</strong>
+        </div>
+        <button class="btn btn-primary" onclick="setGlobalDate(realToday());showPage('report')">当日の売上日報を開く</button>
+      </div></div>`;
+    return;
+  }
   setLoading();
   const date = currentDate;
   const r = await fetch(`${API}/daily-reports/${date}`).then(res=>res.json()).catch(()=>null);
