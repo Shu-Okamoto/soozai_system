@@ -1120,14 +1120,20 @@ async function goToActual(date) {
 // 出荷実績入力（マトリクス表示）
 // ═══════════════════════════════════════════════
 async function renderActualPage() {
-  // 出荷実績入力は当日のみ（管理者・メンバー共通。過去日・翌日とも不可）。
-  const today = realToday();
-  if (currentDate !== today) {
+  // 出荷実績入力は当日のみ。ただし管理者は過去日を修正できる（画面内の「確定解除」ロックで制御）。
+  // ・翌日以降：全員不可　・過去日：メンバー不可／管理者のみ可　・当日：全員可
+  const today   = realToday();
+  const isAdmin = currentRole === 'admin';
+  const editable = currentDate === today || (isAdmin && currentDate < today);
+  if (!editable) {
+    const msg = currentDate > today
+      ? `出荷実績入力は<strong>当日（${today}）</strong>までです。翌日以降は入力できません。`
+      : `過去日（<strong>${currentDate}</strong>）の実績修正は<strong>管理者のみ</strong>可能です。`;
     document.getElementById('content').innerHTML = `
       <div class="card"><div class="card-body" style="text-align:center;padding:48px 24px">
         <div style="font-size:40px;margin-bottom:12px">🗓</div>
         <div style="font-size:15px;line-height:1.7;margin-bottom:20px">
-          出荷実績入力は<strong>当日（${today}）のみ</strong>入力できます。<br>
+          ${msg}<br>
           選択中の日付：<strong>${currentDate}</strong>
         </div>
         <button class="btn btn-primary" onclick="goToTodayActual()">当日の実績入力を開く</button>
