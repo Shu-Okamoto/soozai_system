@@ -2318,6 +2318,20 @@ function checklistPeriodKey(mode){ return currentDate; }
 function switchChecklist(mode){ checklistMode = mode; renderChecklistPage(); }
 
 async function renderChecklistPage() {
+  // チェックリスト（日々・衛生作業リスト共通）は当日のみ。過去日・翌日以降は開けない。
+  const clToday = realToday();
+  if (currentDate !== clToday) {
+    document.getElementById('content').innerHTML = `
+      <div class="card"><div class="card-body" style="text-align:center;padding:48px 24px">
+        <div style="font-size:40px;margin-bottom:12px">✅</div>
+        <div style="font-size:15px;line-height:1.7;margin-bottom:20px">
+          チェックリストは<strong>当日（${clToday}）のみ</strong>記録できます。<br>
+          選択中の日付：<strong>${currentDate}</strong>
+        </div>
+        <button class="btn btn-primary" onclick="setGlobalDate(realToday());showPage('checklist')">当日のチェックリストを開く</button>
+      </div></div>`;
+    return;
+  }
   if (checklistMode === 'sanitation') return renderSanitationPage();
   setLoading();
   const mode       = checklistMode;
