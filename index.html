@@ -612,6 +612,20 @@ function goToNextDayPlan() {
 
 function showPage(page) {
   currentPage = page;
+  // 出荷指示書（調整保存）は翌日以降のみ。開くときの既定対象日は「翌日」に合わせる。
+  if (page === 'plan') {
+    const t = realToday();
+    if (currentDate <= t) {
+      const d = new Date(t); d.setDate(d.getDate()+1);
+      setGlobalDate(d.toISOString().slice(0,10));
+    }
+  }
+  // 実績入力画面では日付ピッカーを固定（他の日付を選択できない）。他画面では解除。
+  const gd = document.getElementById('global-date');
+  if (gd) {
+    gd.disabled = (page === 'actual');
+    gd.title = (page === 'actual') ? '実績入力は当日固定です' : '';
+  }
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
   const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:(deptFeatures().production?'請求先マスタ':'出荷先マスタ'),orderproducts:'発注商品マスタ',suppliers:'業者マスタ',pricelist:'単価表マスタ',deliverydests:'納品先マスタ',issuer:'自社情報マスタ',members:'メンバーマスタ',production:'製造日報',inventory:'在庫',shipments:'出荷登録',invoice:'請求書',shipanalysis:'売上分析',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成',import:'売上実績取込'};
