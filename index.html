@@ -2191,27 +2191,6 @@ const CHECKLIST_DAILY = [
     {key:'d_trash',   label:'廃棄物・生ゴミの適切な処理（ふた付き・速やかな搬出）'},
   ]},
 ];
-// 月のチェックリスト
-const CHECKLIST_MONTHLY = [
-  { cat:'設備・環境（HACCP）', items:[
-    {key:'m_thermo',  label:'冷蔵庫・冷凍庫の温度計の点検（表示の確認・必要に応じ校正）'},
-    {key:'m_clean',   label:'清掃が行き届きにくい箇所の清掃（換気扇・排水溝・冷蔵庫裏・天井）'},
-    {key:'m_pest',    label:'防虫・防その確認（ねずみ・昆虫の侵入痕跡・捕獲器の点検）'},
-    {key:'m_equip',   label:'調理機器・設備の点検（破損・劣化・パッキン・ガタつき）'},
-  ]},
-  { cat:'記録・管理（HACCP）', items:[
-    {key:'m_stock',   label:'在庫・期限切れ食材の点検と処分'},
-    {key:'m_record',  label:'日々の衛生管理記録の確認・保管（記入漏れの点検）'},
-    {key:'m_water',   label:'使用水の管理状況の確認（必要に応じ水質検査）'},
-  ]},
-  { cat:'プラスアルファの衛生管理', items:[
-    {key:'m_edu',     label:'従業員への衛生教育・研修の実施'},
-    {key:'m_kenben',  label:'検便（腸内細菌検査）の実施状況の確認'},
-    {key:'m_health',  label:'健康診断の実施状況の確認'},
-    {key:'m_manual',  label:'衛生管理マニュアル・手順書の見直し'},
-    {key:'m_claim',   label:'クレーム・異常事例の振り返りと再発防止の確認'},
-  ]},
-];
 // 週間・月1衛生作業リスト（実施ボタン）
 // freq: 'week'=週1（既定）, 'month2'=月2, 'month1'=月1。実施日を記録し、超過でアラート。
 const CHECKLIST_SANITATION = [
@@ -2254,14 +2233,13 @@ const SANITATION_FREQ = {
   month1: { days:30, label:'月1' },
 };
 
-let checklistMode = 'daily'; // 'daily' | 'monthly' | 'sanitation'
+let checklistMode = 'daily'; // 'daily' | 'sanitation'
 
 function checklistDef(mode){
-  if (mode === 'monthly')    return CHECKLIST_MONTHLY;
   if (mode === 'sanitation') return CHECKLIST_SANITATION;
   return CHECKLIST_DAILY;
 }
-function checklistPeriodKey(mode){ return mode === 'monthly' ? currentDate.slice(0,7) : currentDate; }
+function checklistPeriodKey(mode){ return currentDate; }
 
 function switchChecklist(mode){ checklistMode = mode; renderChecklistPage(); }
 
@@ -2305,22 +2283,19 @@ async function renderChecklistPage() {
     .concat(cachedMembers.map(m=>`<option value="${m.name}" ${m.name===lastBy?'selected':''}>${m.name}</option>`))
     .join('');
 
-  const dateLabel = mode==='monthly'
-    ? `${periodKey.slice(0,4)}年${periodKey.slice(5,7)}月`
-    : periodKey;
+  const dateLabel = periodKey;
 
   document.getElementById('content').innerHTML = `
     <div style="max-width:820px;margin:0 auto">
       <div style="display:flex;gap:8px;margin-bottom:16px">
         <button class="btn ${mode==='daily'  ?'btn-primary':'btn-secondary'}" onclick="switchChecklist('daily')">📅 日々のチェックリスト</button>
-        <button class="btn ${mode==='monthly'?'btn-primary':'btn-secondary'}" onclick="switchChecklist('monthly')">🗓 月のチェックリスト</button>
         <button class="btn ${mode==='sanitation'?'btn-primary':'btn-secondary'}" onclick="switchChecklist('sanitation')">🧽 衛生作業リスト</button>
       </div>
       <div class="card mb-16">
         <div class="card-body" style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between">
           <div style="font-size:14px;color:var(--text2)">
             対象：<strong style="color:var(--text)">${dateLabel}</strong>
-            <span style="margin-left:8px">（${mode==='daily'?'日次':'月次'}の衛生管理）</span>
+            <span style="margin-left:8px">（日次の衛生管理）</span>
           </div>
           <div style="display:flex;align-items:center;gap:8px">
             <label style="font-size:13px;color:var(--text2)">記入者</label>
@@ -2402,7 +2377,6 @@ async function renderSanitationPage() {
     <div style="max-width:820px;margin:0 auto">
       <div style="display:flex;gap:8px;margin-bottom:16px">
         <button class="btn btn-secondary" onclick="switchChecklist('daily')">📅 日々のチェックリスト</button>
-        <button class="btn btn-secondary" onclick="switchChecklist('monthly')">🗓 月のチェックリスト</button>
         <button class="btn btn-primary" onclick="switchChecklist('sanitation')">🧽 衛生作業リスト</button>
       </div>
       <div class="card mb-16">
