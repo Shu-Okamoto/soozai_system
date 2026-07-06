@@ -1446,7 +1446,10 @@ def get_daily_report(date_str):
     # ただし以前確定→明示解除された日（snapshot 残存）は再確定しない（編集中扱い）
     # 製造フロー部署（漬物部）は「確定後も修正可」のため自動確定しない。
     feats = (cfg.get('features') or {})
-    if (not feats.get('production')) and date_str < today_jst().isoformat() and not (stored and stored.get('actuals_snapshot')):
+    # snapshot の有無は None 判定で見る。実績ゼロの日は snapshot が空リスト [] になるため、
+    # 真偽値で見ると「確定解除→再表示」で即座に自動再確定されて解除できなくなる。
+    has_snapshot = bool(stored) and (stored.get('actuals_snapshot') is not None)
+    if (not feats.get('production')) and date_str < today_jst().isoformat() and not has_snapshot:
         finalize_report(date_str, did, cfg)
         return get_daily_report(date_str)
 
