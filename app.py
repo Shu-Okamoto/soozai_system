@@ -1402,8 +1402,10 @@ def save_daily_report_row(data):
     else:
         sb.table('hq_daily_reports').insert(data).execute()
 
-def finalize_report(date_str, did, cfg):
-    """date_str の日報を確定する。既に確定済みなら False。"""
+def finalize_report(date_str, did, cfg, manual=False):
+    """date_str の日報を確定する。既に確定済みなら False。
+    manual=True（画面からの手動確定）は実際の確定時刻を記録する。
+    自動確定（遅延確定・バッチ）は従来どおり営業日の終了時刻に補正する。"""
     stored = sb.table('hq_daily_reports').select('expense,weather,note,finalized_at').eq('department_id',did).eq('date',date_str).execute().data
     if stored and stored[0].get('finalized_at'):
         return False
@@ -1421,7 +1423,7 @@ def finalize_report(date_str, did, cfg):
         'actuals_snapshot':  snap['actuals_detail'],
         'shifts_snapshot':   snap['shifts'],
         'channels_snapshot': snap['channels'],
-        'finalized_at':      finalize_ts(date_str),
+        'finalized_at':      now_jst_iso() if manual else finalize_ts(date_str),
     }
     save_daily_report_row(data)
     return True
@@ -1468,7 +1470,7 @@ def get_daily_report(date_str):
 @app.route('/api/daily-reports/<date_str>/finalize', methods=['POST'])
 def finalize_daily_report(date_str):
     dep = get_dept()
-    if finalize_report(date_str, dep['id'], dep.get('config') or {}):
+    if finalize_report(date_str, dep['id'], dep.get('config') or {}, manual=True):
         return jsonify({'ok': True, 'finalized_at': now_jst_iso()})
     return jsonify({'ok': False, 'error': 'already finalized'}), 409
 
