@@ -621,10 +621,12 @@ function showPage(page) {
     }
   }
   // 実績入力画面では日付ピッカーを固定（他の日付を選択できない）。他画面では解除。
+  // ただし管理者は過去日の実績修正（確定解除→編集）ができるよう選択可のままにする。
   const gd = document.getElementById('global-date');
   if (gd) {
-    gd.disabled = (page === 'actual');
-    gd.title = (page === 'actual') ? '実績入力は当日固定です' : '';
+    const lock = (page === 'actual' && currentRole !== 'admin');
+    gd.disabled = lock;
+    gd.title = lock ? '実績入力は当日固定です' : '';
   }
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
