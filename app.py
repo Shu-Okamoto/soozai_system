@@ -179,7 +179,9 @@ def get_products():
 @app.route('/api/products', methods=['POST'])
 def add_product():
     d = request.json
-    sb.table('hq_products').insert({'name':d['name'],'price':d['price'],'category':d['category'],'subcategory':d.get('subcategory',''),'prod_type':d.get('prod_type','manufacture'),'department_id':dept_id()}).execute()
+    # active はDB既定値に依存せず明示的に 1 を入れる（NULL だと一覧APIの active=1 絞込から漏れ、
+    # 商品マスタには出るが実績入力・出荷指示書に出ない不整合が起きる）
+    sb.table('hq_products').insert({'name':d['name'],'price':d['price'],'category':d['category'],'subcategory':d.get('subcategory',''),'prod_type':d.get('prod_type','manufacture'),'active':1,'department_id':dept_id()}).execute()
     return jsonify({'ok': True})
 
 @app.route('/api/products/<int:pid>', methods=['PUT'])
@@ -203,7 +205,7 @@ def add_channel():
     did = dept_id()
     r = sb.table('hq_channels').select('sort_order').eq('department_id',did).order('sort_order', desc=True).limit(1).execute()
     max_order = r.data[0]['sort_order'] if r.data else 0
-    row = {'name':d['name'],'sort_order':max_order+1,'department_id':did}
+    row = {'name':d['name'],'sort_order':max_order+1,'active':1,'department_id':did}
     for f in ('zip','address','phone','fax','ctype','contact','email'):
         if f in d: row[f] = d[f]
     sb.table('hq_channels').insert(row).execute()
@@ -240,7 +242,7 @@ def add_supplier():
         sb.table('hq_suppliers').insert({
             'name':name,'order_days':d.get('order_days',''),'delivery_days':d.get('delivery_days',''),
             'phone':d.get('phone',''),'site_url':d.get('site_url',''),
-            'sort_order':max_order+1,'department_id':did
+            'sort_order':max_order+1,'active':1,'department_id':did
         }).execute()
     except Exception:
         return jsonify({'ok': False, 'error': '同名の業者が既にあります'}), 400
@@ -302,7 +304,7 @@ def add_order_product():
         sb.table('hq_order_products').insert({
             'name':name,'category':(d.get('category') or '').strip(),'price':d.get('price',0) or 0,
             'supplier_id':d.get('supplier_id') or None,'base_qty':d.get('base_qty',0) or 0,
-            'order_unit':d.get('order_unit',0) or 0,'sort_order':max_order+1,'department_id':did
+            'order_unit':d.get('order_unit',0) or 0,'sort_order':max_order+1,'active':1,'department_id':did
         }).execute()
     except Exception:
         return jsonify({'ok': False, 'error': '同名の発注商品が既にあります'}), 400
@@ -505,7 +507,7 @@ def add_delivery_destination():
     sb.table('hq_delivery_destinations').insert({
         'department_id':did,'channel_id':d['channel_id'],'name':d['name'].strip(),
         'address':d.get('address','') or '','zip':d.get('zip','') or '','phone':d.get('phone','') or '',
-        'sort_order':d.get('sort_order',0) or 0
+        'sort_order':d.get('sort_order',0) or 0,'active':1
     }).execute()
     return jsonify({'ok': True})
 
@@ -1093,7 +1095,7 @@ def add_member():
     if not is_hq_request():
         return jsonify({'ok': False, 'error': 'メンバー編集は本部のみ可能です'}), 403
     d = request.json
-    sb.table('hq_members').insert({'name':d['name'],'hourly_wage':d.get('hourly_wage',0)}).execute()
+    sb.table('hq_members').insert({'name':d['name'],'hourly_wage':d.get('hourly_wage',0),'active':1}).execute()
     return jsonify({'ok': True})
 
 @app.route('/api/members/<int:mid>', methods=['PUT'])
