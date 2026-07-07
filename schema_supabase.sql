@@ -437,3 +437,14 @@ ALTER TABLE hq_shipments ALTER COLUMN product_id DROP NOT NULL;
 UPDATE hq_departments
    SET config = jsonb_set(config, '{features,production}', 'true'::jsonb)
  WHERE code = 'tsukemono';
+
+-- ─── active=NULL の修復（再実行安全）──────────────────
+-- INSERT が active を明示せずDB既定値も効いていない環境では active=NULL の行ができ、
+-- 一覧API（active=1 絞込）から漏れて「マスタには見えるが選択肢に出ない」不整合になる。
+-- アプリ側は INSERT で active=1 を明示するよう修正済み。既存の NULL 行はこれで直す。
+UPDATE hq_products              SET active = 1 WHERE active IS NULL;
+UPDATE hq_channels              SET active = 1 WHERE active IS NULL;
+UPDATE hq_suppliers             SET active = 1 WHERE active IS NULL;
+UPDATE hq_order_products        SET active = 1 WHERE active IS NULL;
+UPDATE hq_delivery_destinations SET active = 1 WHERE active IS NULL;
+UPDATE hq_members               SET active = 1 WHERE active IS NULL;
