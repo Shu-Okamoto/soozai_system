@@ -158,6 +158,7 @@
       <button class="nav-item" onclick="showPage('production')" id="nav-production">🏭 製造日報</button>
       <button class="nav-item" onclick="showPage('inventory')"  id="nav-inventory">📦 在庫</button>
       <button class="nav-item" onclick="showPage('shipments')"  id="nav-shipments">🚚 出荷登録</button>
+      <button class="nav-item" onclick="showPage('specs')"      id="nav-specs">📄 商品規格書</button>
       <button class="nav-item admin-only" onclick="showPage('invoice')" id="nav-invoice">🧾 請求書</button>
     </div>
     <div class="nav-group admin-only">
@@ -630,11 +631,11 @@ function showPage(page) {
   }
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:(deptFeatures().production?'請求先マスタ':'出荷先マスタ'),orderproducts:'発注商品マスタ',suppliers:'業者マスタ',pricelist:'単価表マスタ',deliverydests:'納品先マスタ',issuer:'自社情報マスタ',members:'メンバーマスタ',production:'製造日報',inventory:'在庫',shipments:'出荷登録',invoice:'請求書',shipanalysis:'売上分析',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成',import:'売上実績取込'};
+  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:(deptFeatures().production?'請求先マスタ':'出荷先マスタ'),orderproducts:'発注商品マスタ',suppliers:'業者マスタ',pricelist:'単価表マスタ',deliverydests:'納品先マスタ',issuer:'自社情報マスタ',members:'メンバーマスタ',production:'製造日報',inventory:'在庫',shipments:'出荷登録',specs:'商品規格書',invoice:'請求書',shipanalysis:'売上分析',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成',import:'売上実績取込'};
   document.getElementById('page-title').textContent = titles[page]||'';
   ({plan:renderPlanPage,actual:renderActualPage,report:renderReportPage,
     menu:renderMenuPage,order:renderOrderPage,checklist:renderChecklistPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,orderproducts:renderOrderProductsPage,suppliers:renderSuppliersPage,pricelist:renderPriceListPage,deliverydests:renderDeliveryDestPage,issuer:renderIssuerPage,members:renderMembersPage,
-    production:renderProductionPage,inventory:renderInventoryPage,shipments:renderShipmentsPage,invoice:renderInvoicePage,shipanalysis:renderShipAnalysisPage,
+    production:renderProductionPage,inventory:renderInventoryPage,shipments:renderShipmentsPage,specs:renderSpecsPage,invoice:renderInvoicePage,shipanalysis:renderShipAnalysisPage,
     adminplan:renderAdminPlanPage,adminmenu:renderAdminMenuPage,adminshifts:renderAdminShiftsPage,import:renderImportPage})[page]?.();
 }
 
@@ -4457,6 +4458,173 @@ async function deleteDeliveryDest(id) {
   if (!confirm('この納品先を削除しますか？')) return;
   const r = await fetch(`${API}/delivery-destinations/${id}`, {method:'DELETE'}).then(r=>r.json()).catch(()=>null);
   if (r?.ok) { showToast('削除しました'); loadDeliveryDests(); } else showToast('削除失敗', true);
+}
+
+// ── 商品規格書（漬物部：商品ごとの規格書を表示・印刷）──
+const MIKAWA_ISSUER = '㈲みかわ　〒740-0032 岩国市尾津町5-11-1　☎0827-32-1346';
+const NARAZUKE_ING = [
+  {group:'原材料',    items:[{n:'白瓜',o:'山口県産'},{n:'酒粕',o:'㈲みかわ山口県'}]},
+  {group:'漬け原材料',items:[{n:'食塩',o:'日本'},{n:'砂糖',o:'日本'},{n:'焼酎',o:'日本'},{n:'みりん',o:'日本'}]},
+];
+const NARAZUKE_PROC = [{s:'農産',b:'契約栽培'},{s:'塩漬け',b:'㈲広中食品'},{s:'干し',b:'㈲みかわ'},{s:'粕漬け'},{s:'漬け替え'},{s:'保存'},{s:'包装'},{s:'箱詰・発送'}];
+const NARAZUKE_NUT_DASSAI = {basis:'100ｇあたり', rows:[['エネルギー','179kcal'],['タンパク質','2.3g'],['脂質','0g'],['炭水化物','34.6g'],['ナトリウム','1.35g'],['食塩','3.4g']]};
+const NARAZUKE_NUT_GANGI  = {basis:'100ｇあたり', rows:[['エネルギー','157kcal'],['タンパク質','4.5g'],['脂質','0.17g'],['炭水化物','40.8g'],['ナトリウム','1.7g'],['食塩','4.3g']]};
+const MANJU_BASE = {
+  issuer:'㈲みかわ　岩国市尾津町5-11-1 みかわ惣菜本部　tel.0827-32-1346',
+  origin:'国産', allergy:'小麦', expiry:'3週間', storage:'直射日光、高温多湿を避け保存',
+  nutrition:{basis:'1個あたり 約30ｇ', rows:[['エネルギー','78kcal'],['タンパク質','1.44g'],['脂質','0.15g'],['炭水化物','17.7g'],['ナトリウム','18.9g'],['食塩','0.1g']]},
+  features:['旭酒造に承認された商品','獺祭の酒粕使用','国産小豆100％使用','解凍後発送。在庫できる。'],
+  ingredients:[{group:'原材料', items:[{n:'小豆',o:'北海道産'},{n:'砂糖',o:'日本'},{n:'薯蕷粉',o:'日本'},{n:'小麦粉',o:'日本'},{n:'酒粕',o:'旭酒造 獺祭'},{n:'山芋粉',o:'日本'},{n:'酒',o:'日本'},{n:'膨張剤',o:'日本'},{n:'トレハロース',o:'日本'}]}],
+  process:[{s:'製餡',b:'三木屋'},{s:'包餡・計量'},{s:'蒸し'},{s:'個包装'},{s:'冷凍',b:'みかわ'},{s:'解凍'},{s:'検品・包装'},{s:'箱詰・発送'}],
+  procNote:'製造委託先 ㈲三木屋／2次加工 ㈲みかわ',
+};
+const SPEC_SHEETS = [
+  { name:'奈良漬タルタルジョージ',
+    issuer:'いわくにアグリパートナーズ　〒740-0032 岩国市尾津町5-11-1　☎0827-32-7045',
+    amount:'90g', price:'オープン', origin:'山口県産', lot:'12×4', weight:'約4kg',
+    jan:'4900635040203', expiry:'6か月', size:'65×65×60', storage:'直射日光、高温多湿を避け保存', allergy:'なし',
+    nutrition:{basis:'100ｇあたり', rows:[['エネルギー','503kcal'],['タンパク質','1.5g'],['脂質','50.3g'],['炭水化物','10.1g'],['食塩相当量','2.7g']], note:'推定値'},
+    spec:'大吟醸の奈良漬を使用することで唯一無二のプレミアムタルタルです。おつまみをグレードアップする調味料として最適。',
+    features:['山口県平生町の「丸三食品」に製造委託している','大吟醸の奈良漬使用','親しみやすい名前','奈良漬タルタル'],
+    ingredients:[{group:'原材料', items:[{n:'マヨネーズ',o:'国内製造'},{n:'奈良漬',o:'㈲みかわ山口県'},{n:'たまねぎ'},{n:'リンゴ酢'},{n:'砂糖'},{n:'食塩'},{n:'ブラックペッパー'},{n:'香辛料抽出物'}]}],
+    ingNote:'一部に卵、小麦、大豆、りんごを含む',
+    process:[{s:'マヨネーズ',b:'丸三食品'},{s:'調味'},{s:'奈良漬投入'},{s:'充填'},{s:'瓶詰'},{s:'保存',b:'㈲みかわ'},{s:'包装'},{s:'箱詰・発送'}] },
+  { name:'いりこ酢', issuer:MIKAWA_ISSUER,
+    amount:'330ml', price:'630円', origin:'周防大島産', lot:'12×4', weight:'約4kg',
+    jan:'4580476360809', expiry:'1年半', size:'', storage:'直射日光、高温多湿を避け保存', allergy:'なし',
+    nutrition:{basis:'100ｇあたり', rows:[['エネルギー','150kcal'],['タンパク質','5.3g'],['脂質','0.1g'],['炭水化物','32.1g'],['食塩相当量','2.95g']]},
+    spec:'周防大島産の浮島いりこを焦がし酢に染み込ませたもの。酢ものや和え物にそのまま使用できる南蛮調味酢です。',
+    features:['広島県大竹市「三国酢造」に製造委託している','周防大島産浮島いりこ使用','香ばしい香りと奥深い味わい','見た目・インパクトのある商品'],
+    ingredients:[{group:'原材料', items:[{n:'醸造酢',o:'三国酢造'},{n:'砂糖',o:'㈲みかわ山口県'},{n:'食塩'},{n:'みりん'},{n:'片口いわし',o:'オイシーフーズ'},{n:'調味料（アミノ酸等）'}]}],
+    process:[{s:'醸造',b:'三国酢造'},{s:'調味'},{s:'いりこ投入'},{s:'充填'},{s:'瓶詰'},{s:'保存',b:'㈲みかわ'},{s:'包装'},{s:'箱詰・発送'}] },
+  { name:'大吟醸の奈良漬きざみ', issuer:MIKAWA_ISSUER,
+    amount:'85g', price:'580円', origin:'山口県産', lot:'12×4', weight:'約4kg',
+    jan:'4580476360113', expiry:'4ヶ月', size:'180×130', storage:'直射日光、高温多湿を避け保存', allergy:'なし',
+    nutrition:NARAZUKE_NUT_DASSAI,
+    spec:'刻んだ奈良漬（85g〜88g）を酒粕（20g程度）と一緒に詰めて真空包装したもの。',
+    features:['旭酒造に承認された商品','獺祭の酒粕使用','山口県産白瓜使用','農業〜製造加工まで自社管理'],
+    ingredients:NARAZUKE_ING, process:NARAZUKE_PROC, procNote:'天日干し・無添加・無着色' },
+  { name:'大吟醸の奈良漬', issuer:MIKAWA_ISSUER,
+    amount:'120g', price:'840円', origin:'山口県産', lot:'12×4', weight:'約5kg',
+    jan:'4580476360090', expiry:'4ヶ月', size:'230×130', storage:'直射日光、高温多湿を避け保存', allergy:'なし',
+    nutrition:NARAZUKE_NUT_DASSAI,
+    spec:'奈良漬（120g〜130g）の一枚ものを酒粕（25g程度）と一緒に詰めて真空包装したもの。',
+    features:['旭酒造に承認された商品','獺祭の酒粕使用','山口県産白瓜使用','農業〜製造加工まで自社管理'],
+    ingredients:NARAZUKE_ING, process:NARAZUKE_PROC, procNote:'天日干し・無添加・無着色' },
+  { name:'大吟醸の奈良漬 贈答用', issuer:MIKAWA_ISSUER,
+    amount:'170g', price:'1,500円', origin:'山口県産', lot:'12×4', weight:'約4kg',
+    jan:'4580476360021', expiry:'4か月', size:'230×130', storage:'直射日光、高温多湿を避け保存', allergy:'なし',
+    nutrition:NARAZUKE_NUT_DASSAI,
+    spec:'奈良漬（170g〜180g）の一枚ものを酒粕（30g程度）と一緒に詰めて真空包装したもの。',
+    features:['旭酒造に承認された商品','獺祭の酒粕使用','山口県産白瓜使用','農業〜製造加工まで自社管理'],
+    ingredients:NARAZUKE_ING, process:NARAZUKE_PROC },
+  { name:'大吟醸の奈良漬雁木きざみ', issuer:MIKAWA_ISSUER,
+    amount:'85g', price:'580円', origin:'山口県産', lot:'12×4', weight:'約4kg',
+    jan:'4580476360014', expiry:'4ヶ月', size:'180×130', storage:'直射日光、高温多湿を避け保存', allergy:'なし',
+    nutrition:NARAZUKE_NUT_DASSAI,
+    spec:'刻んだ奈良漬（85g〜88g）を酒粕（10g程度）と一緒に詰めて真空包装したもの。',
+    features:['八百新酒造に承認された商品','雁木の酒粕使用','山口県産白瓜使用','農業〜製造加工まで自社管理'],
+    ingredients:NARAZUKE_ING, process:NARAZUKE_PROC, procNote:'天日干し・無添加・無着色' },
+  { name:'大吟醸の奈良漬 雁木', issuer:MIKAWA_ISSUER,
+    amount:'120g', price:'840円', origin:'山口県産', lot:'12×4', weight:'約4kg',
+    jan:'4580476360182', expiry:'4ヶ月', size:'230×130', storage:'直射日光、高温多湿を避け保存', allergy:'なし',
+    nutrition:NARAZUKE_NUT_GANGI,
+    spec:'奈良漬（120g〜130g）の一枚ものを酒粕（25g）と一緒に詰めて真空包装したもの。',
+    features:['八百新酒造に承認された商品','雁木の酒粕使用','山口県産白瓜使用','農業〜製造加工まで自社管理'],
+    ingredients:NARAZUKE_ING, process:NARAZUKE_PROC, procNote:'天日干し・無添加・無着色' },
+  { name:'大吟醸の奈良漬 雁木贈答用', issuer:MIKAWA_ISSUER,
+    amount:'170g', price:'1,500円', origin:'山口県産', lot:'12×4', weight:'約4kg',
+    jan:'4580476360144', expiry:'1年', size:'230×130', storage:'直射日光、高温多湿を避け保存', allergy:'なし',
+    nutrition:NARAZUKE_NUT_GANGI,
+    spec:'奈良漬（170g〜180g）の一枚ものを酒粕（30g）と一緒に詰めて真空包装したもの。',
+    features:['八百新酒造に承認された商品','雁木の酒粕使用','山口県産白瓜使用','農業〜製造加工まで自社管理'],
+    ingredients:NARAZUKE_ING, process:NARAZUKE_PROC },
+  { ...MANJU_BASE, name:'里の味みかわの酒粕饅頭 升々（4個）',
+    amount:'4個', price:'560円', lot:'40袋', weight:'約6.3kg',
+    jan:'4580476360069', size:'200×55×30（ケース 430×315×255）' },
+  { ...MANJU_BASE, name:'里の味みかわの酒粕饅頭 升々（8個）',
+    amount:'8個', price:'1,500円', lot:'20箱', weight:'約7.5kg',
+    jan:'4580476360076', size:'210×130×50（外装 210×130×50）' },
+];
+
+let specIndex = 0;
+
+function renderSpecsPage() {
+  const s = SPEC_SHEETS[specIndex] || SPEC_SHEETS[0];
+  const opts = SPEC_SHEETS.map((p,i)=>`<option value="${i}" ${i===specIndex?'selected':''}>${esc(p.name)}</option>`).join('');
+  const kv = (label, val) => `
+    <tr><th style="width:130px;text-align:left;background:rgba(0,0,0,.04);padding:6px 10px;font-size:13px;white-space:nowrap">${label}</th>
+    <td style="padding:6px 10px;font-size:14px">${esc(val||'―')}</td></tr>`;
+  const nutRows = s.nutrition.rows.map(([k,v])=>`
+    <tr><th style="text-align:left;background:rgba(0,0,0,.04);padding:5px 10px;font-size:13px">${k}</th>
+    <td style="padding:5px 10px;font-size:14px;text-align:right">${v}</td></tr>`).join('');
+  const ingRows = s.ingredients.map(g =>
+    g.items.map((it,i)=>`
+      <tr>${i===0?`<th rowspan="${g.items.length}" style="width:90px;background:rgba(0,0,0,.04);padding:5px 10px;font-size:13px;vertical-align:top">${g.group}</th>`:''}
+      <td style="padding:5px 10px;font-size:14px">${esc(it.n)}</td>
+      <td style="padding:5px 10px;font-size:13px;color:var(--text2)">${esc(it.o||'')}</td></tr>`).join('')
+  ).join('');
+  const procFlow = s.process.map(p=>`
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="background:var(--accent-light);color:var(--accent);border-radius:6px;padding:4px 14px;font-size:13px;font-weight:600;min-width:100px;text-align:center">${esc(p.s)}</span>
+      ${p.b?`<span style="font-size:12px;color:var(--text2)">${esc(p.b)}</span>`:''}
+    </div>`).join('<div style="text-align:center;color:var(--text3);font-size:11px;padding:1px 0 1px 44px;width:100px">▼</div>');
+
+  document.getElementById('content').innerHTML = `
+    <div style="max-width:860px;margin:0 auto">
+      <div class="no-print" style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+        <label style="font-size:13px;color:var(--text2)">商品</label>
+        <select onchange="specIndex=+this.value;renderSpecsPage()" style="min-width:260px">${opts}</select>
+        <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="window.print()">🖨 印刷</button>
+      </div>
+      <div class="card invoice-sheet">
+        <div class="card-body">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:12px;border-bottom:2px solid var(--text);padding-bottom:8px">
+            <h2 style="font-size:20px;font-weight:700">商品規格書</h2>
+            <div style="font-size:12px;color:var(--text2)">${esc(s.issuer)}</div>
+          </div>
+          <div style="font-size:22px;font-weight:700;margin-bottom:14px">${esc(s.name)}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+            <table style="width:100%;border-collapse:collapse;border:1px solid var(--border)">
+              ${kv('量目', s.amount)}${kv('税別希望小売価格', s.price)}${kv('原料産地', s.origin)}
+              ${kv('最小ロット', s.lot)}${kv('荷姿重量', s.weight)}${kv('JANコード', s.jan)}
+              ${kv('賞味期限', s.expiry)}${kv('商品サイズ', s.size)}${kv('保存方法', s.storage)}
+              ${kv('アレルギー表示', s.allergy)}
+            </table>
+            <div>
+              <table style="width:100%;border-collapse:collapse;border:1px solid var(--border)">
+                <tr><th colspan="2" style="background:rgba(0,0,0,.06);padding:6px 10px;font-size:13px;text-align:left">栄養表示（${s.nutrition.basis}）${s.nutrition.note?`　<span style="font-weight:400;color:var(--text2)">${s.nutrition.note}</span>`:''}</th></tr>
+                ${nutRows}
+              </table>
+              <div style="margin-top:12px;border:1px solid var(--border);border-radius:6px;padding:10px 12px">
+                <div style="font-size:12px;color:var(--text2);margin-bottom:4px">商品特徴</div>
+                <ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7">${s.features.map(f=>`<li>${esc(f)}</li>`).join('')}</ul>
+              </div>
+            </div>
+          </div>
+          ${s.spec?`<div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:16px">
+            <div style="font-size:12px;color:var(--text2);margin-bottom:4px">商品仕様</div>
+            <div style="font-size:14px;line-height:1.7">${esc(s.spec)}</div>
+          </div>`:''}
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div>
+              <div style="font-size:13px;font-weight:700;margin-bottom:6px">原料及び添加物</div>
+              <table style="width:100%;border-collapse:collapse;border:1px solid var(--border)">
+                <tr><th style="background:rgba(0,0,0,.06);padding:5px 10px;font-size:12px;text-align:left" colspan="1"></th>
+                    <th style="background:rgba(0,0,0,.06);padding:5px 10px;font-size:12px;text-align:left">原料及び添加物</th>
+                    <th style="background:rgba(0,0,0,.06);padding:5px 10px;font-size:12px;text-align:left">原産地・メーカー</th></tr>
+                ${ingRows}
+              </table>
+              ${s.ingNote?`<div style="font-size:12px;color:var(--text2);margin-top:6px">※ ${esc(s.ingNote)}</div>`:''}
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:700;margin-bottom:6px">製造工程${s.procNote?`　<span style="font-weight:400;font-size:12px;color:var(--text2)">${esc(s.procNote)}</span>`:''}</div>
+              ${procFlow}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
 }
 
 // ── 自社情報マスタ（請求書の発行元：住所・電話・口座・ロゴ）──
