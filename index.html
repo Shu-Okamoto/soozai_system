@@ -4470,15 +4470,15 @@ const NARAZUKE_ING_GANGI = [
   {group:'原材料',    items:[{n:'白瓜',o:'山口県産'}]},
   {group:'漬け原材料',items:[{n:'酒粕',o:'八百新酒造㈱'},{n:'食塩',o:'日本'},{n:'砂糖',o:'日本'},{n:'焼酎',o:'日本'},{n:'みりん',o:'日本'}]},
 ];
-const NARAZUKE_PROC = [{s:'農産',b:'契約栽培'},{s:'塩漬け',b:'㈲広中食品'},{s:'干し',b:'㈲みかわ'},{s:'粕漬け'},{s:'漬け替え'},{s:'保存'},{s:'包装'},{s:'箱詰・発送'}];
+const NARAZUKE_PROC = [{s:'農産',b:'契約栽培'},{s:'塩漬け',b:'㈲みかわ'},{s:'干し'},{s:'粕漬け'},{s:'漬け替え'},{s:'保存'},{s:'包装'},{s:'箱詰・発送'}];
 const NARAZUKE_NUT_DASSAI = {basis:'100ｇあたり', rows:[['エネルギー','179kcal'],['タンパク質','2.3g'],['脂質','0g'],['炭水化物','34.6g'],['ナトリウム','1.35g'],['食塩','3.4g']]};
 const NARAZUKE_NUT_GANGI  = {basis:'100ｇあたり', rows:[['エネルギー','157kcal'],['タンパク質','4.5g'],['脂質','0.17g'],['炭水化物','40.8g'],['ナトリウム','1.7g'],['食塩','4.3g']]};
 const MANJU_BASE = {
   issuer:'㈲みかわ　岩国市尾津町5-11-1 みかわ惣菜本部　tel.0827-32-1346',
   origin:'国産', allergy:'小麦', expiry:'3週間', storage:'直射日光、高温多湿を避け保存',
   nutrition:{basis:'1個あたり 約30ｇ', rows:[['エネルギー','78kcal'],['タンパク質','1.44g'],['脂質','0.15g'],['炭水化物','17.7g'],['ナトリウム','18.9g'],['食塩','0.1g']]},
-  features:['旭酒造に承認された商品','獺祭の酒粕使用','国産小豆100％使用','解凍後発送。在庫できる。'],
-  ingredients:[{group:'原材料', items:[{n:'小豆',o:'北海道産'},{n:'砂糖',o:'日本'},{n:'薯蕷粉',o:'日本'},{n:'小麦粉',o:'日本'},{n:'酒粕',o:'旭酒造 獺祭'},{n:'山芋粉',o:'日本'},{n:'酒',o:'日本'},{n:'膨張剤',o:'日本'},{n:'トレハロース',o:'日本'}]}],
+  features:['㈱獺祭に承認された商品','獺祭の酒粕使用','国産小豆100％使用','解凍後発送。在庫できる。'],
+  ingredients:[{group:'原材料', items:[{n:'小豆',o:'北海道産'},{n:'砂糖',o:'日本'},{n:'薯蕷粉',o:'日本'},{n:'小麦粉',o:'日本'},{n:'酒粕',o:'㈱獺祭'},{n:'山芋粉',o:'日本'},{n:'酒',o:'日本'},{n:'膨張剤',o:'日本'},{n:'トレハロース',o:'日本'}]}],
   process:[{s:'製餡',b:'三木屋'},{s:'包餡・計量'},{s:'蒸し'},{s:'個包装'},{s:'冷凍',b:'みかわ'},{s:'解凍'},{s:'検品・包装'},{s:'箱詰・発送'}],
   procNote:'製造委託先 ㈲三木屋／2次加工 ㈲みかわ',
 };
@@ -4506,21 +4506,21 @@ const SPEC_SHEETS = [
     jan:'4580476360113', expiry:'4ヶ月', size:'180×130', storage:'直射日光、高温多湿を避け保存', allergy:'なし',
     nutrition:NARAZUKE_NUT_DASSAI,
     spec:'刻んだ奈良漬（85g〜88g）を酒粕（20g程度）と一緒に詰めて真空包装したもの。',
-    features:['旭酒造に承認された商品','獺祭の酒粕使用','山口県産白瓜使用','農業〜製造加工まで自社管理'],
+    features:['㈱獺祭に承認された商品','獺祭の酒粕使用','山口県産白瓜使用','農業〜製造加工まで自社管理'],
     ingredients:NARAZUKE_ING_DASSAI, process:NARAZUKE_PROC, procNote:'天日干し・無添加・無着色' },
   { name:'大吟醸の奈良漬', issuer:MIKAWA_ISSUER,
     amount:'120g', price:'840円', origin:'山口県産', lot:'12×4', weight:'約5kg',
     jan:'4580476360090', expiry:'4ヶ月', size:'230×130', storage:'直射日光、高温多湿を避け保存', allergy:'なし',
     nutrition:NARAZUKE_NUT_DASSAI,
     spec:'奈良漬（120g〜130g）の一枚ものを酒粕（25g程度）と一緒に詰めて真空包装したもの。',
-    features:['旭酒造に承認された商品','獺祭の酒粕使用','山口県産白瓜使用','農業〜製造加工まで自社管理'],
+    features:['㈱獺祭に承認された商品','獺祭の酒粕使用','山口県産白瓜使用','農業〜製造加工まで自社管理'],
     ingredients:NARAZUKE_ING_DASSAI, process:NARAZUKE_PROC, procNote:'天日干し・無添加・無着色' },
   { name:'大吟醸の奈良漬 贈答用', issuer:MIKAWA_ISSUER,
     amount:'170g', price:'1,500円', origin:'山口県産', lot:'12×4', weight:'約4kg',
     jan:'4580476360021', expiry:'4か月', size:'230×130', storage:'直射日光、高温多湿を避け保存', allergy:'なし',
     nutrition:NARAZUKE_NUT_DASSAI,
     spec:'奈良漬（170g〜180g）の一枚ものを酒粕（30g程度）と一緒に詰めて真空包装したもの。',
-    features:['旭酒造に承認された商品','獺祭の酒粕使用','山口県産白瓜使用','農業〜製造加工まで自社管理'],
+    features:['㈱獺祭に承認された商品','獺祭の酒粕使用','山口県産白瓜使用','農業〜製造加工まで自社管理'],
     ingredients:NARAZUKE_ING_DASSAI, process:NARAZUKE_PROC },
   { name:'大吟醸の奈良漬雁木きざみ', issuer:MIKAWA_ISSUER,
     amount:'85g', price:'580円', origin:'山口県産', lot:'12×4', weight:'約4kg',
