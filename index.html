@@ -171,6 +171,7 @@
       <div class="nav-label">分析</div>
       <button class="nav-item" onclick="showPage('monthly')" id="nav-monthly">📈 月次サマリ</button>
       <button class="nav-item" onclick="showPage('yearly')"  id="nav-yearly">📈 年次サマリ</button>
+      <button class="nav-item" onclick="showPage('shipplan')" id="nav-shipplan">📊 出荷分析</button>
       <button class="nav-item" onclick="showPage('shipanalysis')" id="nav-shipanalysis">📊 売上分析</button>
     </div>
     <div class="nav-group admin-only" id="navgroup-data">
@@ -326,7 +327,9 @@ function applyDeptFeatures() {
   const dd = document.getElementById('nav-deliverydests');
   if (dd && !pickles) dd.style.display = 'none';   // 納品先マスタも production部署のみ
   const sa = document.getElementById('nav-shipanalysis');
-  if (sa && !pickles) sa.style.display = 'none';   // 出荷分析も production部署のみ
+  if (sa && !pickles) sa.style.display = 'none';   // 売上分析(製造)も production部署のみ
+  const sp = document.getElementById('nav-shipplan');
+  if (sp) sp.style.display = pickles ? 'none' : '';  // 出荷分析(売上ベース)は弁当部のみ
   const iss = document.getElementById('nav-issuer');
   if (iss && !pickles) iss.style.display = 'none'; // 自社情報マスタも production部署のみ
   if (pickles) {
@@ -631,11 +634,11 @@ function showPage(page) {
   }
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:(deptFeatures().production?'請求先マスタ':'出荷先マスタ'),orderproducts:'発注商品マスタ',suppliers:'業者マスタ',pricelist:'単価表マスタ',deliverydests:'納品先マスタ',issuer:'自社情報マスタ',members:'メンバーマスタ',production:'製造日報',inventory:'在庫',shipments:'出荷登録',specs:'商品規格書',invoice:'請求書',shipanalysis:'売上分析',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成',import:'売上実績取込'};
+  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:(deptFeatures().production?'請求先マスタ':'出荷先マスタ'),orderproducts:'発注商品マスタ',suppliers:'業者マスタ',pricelist:'単価表マスタ',deliverydests:'納品先マスタ',issuer:'自社情報マスタ',members:'メンバーマスタ',production:'製造日報',inventory:'在庫',shipments:'出荷登録',specs:'商品規格書',invoice:'請求書',shipplan:'出荷分析',shipanalysis:'売上分析',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成',import:'売上実績取込'};
   document.getElementById('page-title').textContent = titles[page]||'';
   ({plan:renderPlanPage,actual:renderActualPage,report:renderReportPage,
     menu:renderMenuPage,order:renderOrderPage,checklist:renderChecklistPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,orderproducts:renderOrderProductsPage,suppliers:renderSuppliersPage,pricelist:renderPriceListPage,deliverydests:renderDeliveryDestPage,issuer:renderIssuerPage,members:renderMembersPage,
-    production:renderProductionPage,inventory:renderInventoryPage,shipments:renderShipmentsPage,specs:renderSpecsPage,invoice:renderInvoicePage,shipanalysis:renderShipAnalysisPage,
+    production:renderProductionPage,inventory:renderInventoryPage,shipments:renderShipmentsPage,specs:renderSpecsPage,invoice:renderInvoicePage,shipplan:renderShipPlanAnalysisPage,shipanalysis:renderShipAnalysisPage,
     adminplan:renderAdminPlanPage,adminmenu:renderAdminMenuPage,adminshifts:renderAdminShiftsPage,import:renderImportPage})[page]?.();
 }
 
@@ -2688,6 +2691,244 @@ async function renderYearlyPage() {
             <td class="text-right ${s.total_profit>=0?'text-green':'text-danger'}">${fmt(s.total_profit)}</td>
             <td class="text-right">${s.profit_rate}%</td>
             <td class="text-right">${fmt(s.avg_labor_prod)}</td>
+          </tr></tfoot>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ═══════════════════════════════════════════════
+// 出荷分析（弁当惣菜部：出荷計画づくりのためのデータ分析）
+//   ・今年/前年/前前年の売上・店舗別を比較
+//   ・月別の折れ線（合計3年比較／西店・南店比較）
+//   ・曜日別平均売上（出荷計画に直結）
+// ═══════════════════════════════════════════════
+function fmtMan(n){ return (Math.round((n||0)/1000)/10).toLocaleString(); } // 万円（小数1桁）
+function niceCeil(v){
+  if (v<=0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v/p;
+  const step = n<=1?1 : n<=2?2 : n<=5?5 : 10;
+  return step*p;
+}
+// 複数系列の折れ線SVG。series=[{name,color,values:[...],dashed?}], xLabels=[...]
+function svgLineChart(series, xLabels, opts={}) {
+  const W=opts.width||760, H=opts.height||300;
+  const padL=48, padR=14, padT=14, padB=28;
+  const iw=W-padL-padR, ih=H-padT-padB, n=xLabels.length;
+  let maxV=0; series.forEach(s=>s.values.forEach(v=>{ if(v!=null && v>maxV) maxV=v; }));
+  const nm=niceCeil(maxV);
+  const x=i=> padL + (n<=1?iw/2:iw*i/(n-1));
+  const y=v=> padT + ih - ih*(v/nm);
+  const grid=[0,0.25,0.5,0.75,1].map(f=>{
+    const gy=padT+ih-ih*f;
+    return `<line x1="${padL}" y1="${gy}" x2="${W-padR}" y2="${gy}" stroke="var(--border)" stroke-width="1"/>`
+      +`<text x="${padL-6}" y="${gy+3}" text-anchor="end" font-size="10" fill="var(--text3)">${fmtMan(nm*f)}</text>`;
+  }).join('');
+  const xl=xLabels.map((l,i)=>`<text x="${x(i)}" y="${H-9}" text-anchor="middle" font-size="10" fill="var(--text3)">${l}</text>`).join('');
+  const paths=series.map(s=>{
+    const pts=s.values.map((v,i)=> v==null?null:`${x(i)},${y(v)}`).filter(Boolean).join(' ');
+    const dots=s.values.map((v,i)=> v==null?'':`<circle cx="${x(i)}" cy="${y(v)}" r="2.4" fill="${s.color}"><title>${xLabels[i]}・${s.name}: ¥${fmt(v)}</title></circle>`).join('');
+    return `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="${s.width||2}" ${s.dashed?'stroke-dasharray="4 3" opacity="0.55"':''} stroke-linejoin="round"/>${dots}`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="max-width:100%;height:auto;display:block">${grid}${paths}${xl}</svg>`;
+}
+// 曜日別の積み上げ棒（西店＋南店＋その他＝合計平均）
+function svgDowBars(dow, opts={}) {
+  const W=opts.width||760, H=opts.height||260;
+  const padL=48, padR=14, padT=14, padB=26;
+  const iw=W-padL-padR, ih=H-padT-padB, n=dow.length;
+  const maxV=niceCeil(Math.max(1,...dow.map(d=>d.avg_total)));
+  const y=v=> padT+ih-ih*(v/maxV);
+  const bw=Math.min(56, iw/n*0.6);
+  const cx=i=> padL + iw*(i+0.5)/n;
+  const grid=[0,0.25,0.5,0.75,1].map(f=>{
+    const gy=padT+ih-ih*f;
+    return `<line x1="${padL}" y1="${gy}" x2="${W-padR}" y2="${gy}" stroke="var(--border)" stroke-width="1"/>`
+      +`<text x="${padL-6}" y="${gy+3}" text-anchor="end" font-size="10" fill="var(--text3)">${fmtMan(maxV*f)}</text>`;
+  }).join('');
+  const bars=dow.map((d,i)=>{
+    const other=Math.max(0, d.avg_total - d.avg_west - d.avg_south);
+    const x0=cx(i)-bw/2;
+    let acc=0; const seg=(val,color,label)=>{
+      if(val<=0) return '';
+      const yTop=y(acc+val), h=y(acc)-y(acc+val); acc+=val;
+      return `<rect x="${x0}" y="${yTop}" width="${bw}" height="${Math.max(0,h)}" fill="${color}"><title>${d.dow}・${label}: ¥${fmt(val)}</title></rect>`;
+    };
+    return seg(d.avg_west,'#1565C0','西店')+seg(d.avg_south,'#E65100','南店')+seg(other,'#9E9E9E','その他')
+      +`<text x="${cx(i)}" y="${H-8}" text-anchor="middle" font-size="11" fill="var(--text2)">${d.dow}</text>`
+      +`<text x="${cx(i)}" y="${y(d.avg_total)-4}" text-anchor="middle" font-size="10" fill="var(--text)">${fmtMan(d.avg_total)}</text>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="max-width:100%;height:auto;display:block">${grid}${bars}</svg>`;
+}
+function legendChips(items){
+  return `<div style="display:flex;flex-wrap:wrap;gap:14px;margin:4px 0 10px;font-size:12px">`+
+    items.map(it=>`<span style="display:inline-flex;align-items:center;gap:5px">
+      <span style="width:18px;height:0;border-top:3px ${it.dashed?'dashed':'solid'} ${it.color};display:inline-block"></span>${it.name}</span>`).join('')+`</div>`;
+}
+// 12ヶ月の配列に整形（データ欠損月は null）
+function monthsToArray(data){
+  const arr=new Array(12).fill(null);
+  (data?.months||[]).forEach(m=>{ const i=parseInt(m.month.slice(5,7),10)-1; if(i>=0&&i<12) arr[i]=m; });
+  return arr;
+}
+
+async function renderShipPlanAnalysisPage() {
+  setLoading();
+  const year = parseInt(currentDate.slice(0,4),10) || new Date().getFullYear();
+  const yrs = [year, year-1, year-2];
+  const [d0, d1, d2, dowRes] = await Promise.all([
+    fetch(`${API}/yearly-summary?year=${yrs[0]}`).then(r=>r.json()).catch(()=>null),
+    fetch(`${API}/yearly-summary?year=${yrs[1]}`).then(r=>r.json()).catch(()=>null),
+    fetch(`${API}/yearly-summary?year=${yrs[2]}`).then(r=>r.json()).catch(()=>null),
+    fetch(`${API}/dow-summary?year=${yrs[0]}`).then(r=>r.json()).catch(()=>null),
+  ]);
+  const yd = [d0, d1, d2];
+  const arr = yd.map(monthsToArray);          // arr[k][0..11] = month obj or null
+  const sum = yd.map(d=>d?.summary||null);
+  const monLabels = Array.from({length:12},(_,i)=>`${i+1}月`);
+  const COL = ['#2E7D32','#1565C0','#C77800'];  // 今年/前年/前前年
+
+  const val = (k,i,field)=> arr[k][i]? (arr[k][i][field]||0) : null;
+  const yoy = (cur,prev)=> (prev? Math.round((cur-prev)/prev*1000)/10 : null);
+  const yoyBadge = v => v==null ? '<span style="color:var(--text3)">―</span>'
+    : `<span style="color:${v>=0?'#2E7D32':'#C0392B'};font-weight:600">${v>=0?'+':''}${v}%</span>`;
+
+  // 年間合計（表示中の月の総和）
+  const yTotal = k => (arr[k].reduce((s,m)=> s+(m?.total_sales||0),0));
+  const yWest  = k => (arr[k].reduce((s,m)=> s+(m?.west_sales||0),0));
+  const ySouth = k => (arr[k].reduce((s,m)=> s+(m?.south_sales||0),0));
+
+  const hasAny = yd.some(d=>d?.months?.length);
+  const yearPicker = `<input type="number" min="2020" max="2099" value="${year}" onchange="currentDate=this.value+'-01-01';document.getElementById('global-date').value=currentDate;renderShipPlanAnalysisPage()" style="width:100px;font-size:13px">`;
+
+  if (!hasAny) {
+    document.getElementById('content').innerHTML = `
+      <div class="no-print btn-group mb-16">${yearPicker}</div>
+      <div class="alert alert-warn">${year}年および前年・前前年のデータがありません。</div>`;
+    return;
+  }
+
+  // ① 総合売上 3年比較の折れ線
+  const totalSeries = [
+    {name:`${yrs[0]}年（今年）`, color:COL[0], values:arr[0].map(m=>m?m.total_sales:null), width:2.4},
+    {name:`${yrs[1]}年（前年）`, color:COL[1], values:arr[1].map(m=>m?m.total_sales:null)},
+    {name:`${yrs[2]}年（前前年）`,color:COL[2], values:arr[2].map(m=>m?m.total_sales:null)},
+  ];
+  // ② 西店 vs 南店（今年＝実線、前年＝破線）
+  const storeSeries = [
+    {name:`西店 ${yrs[0]}`, color:'#1565C0', values:arr[0].map(m=>m?m.west_sales:null), width:2.4},
+    {name:`南店 ${yrs[0]}`, color:'#E65100', values:arr[0].map(m=>m?m.south_sales:null), width:2.4},
+    {name:`西店 ${yrs[1]}`, color:'#1565C0', values:arr[1].map(m=>m?m.west_sales:null), dashed:true},
+    {name:`南店 ${yrs[1]}`, color:'#E65100', values:arr[1].map(m=>m?m.south_sales:null), dashed:true},
+  ];
+
+  // 月別比較テーブル
+  const monthTable = monLabels.map((lb,i)=>{
+    const t0=val(0,i,'total_sales'), t1=val(1,i,'total_sales'), t2=val(2,i,'total_sales');
+    return `<tr>
+      <td class="left">${lb}</td>
+      <td class="text-right" style="color:${COL[0]};font-weight:600">${t0==null?'―':fmt(t0)}</td>
+      <td class="text-right" style="color:${COL[1]}">${t1==null?'―':fmt(t1)}</td>
+      <td class="text-right" style="color:${COL[2]}">${t2==null?'―':fmt(t2)}</td>
+      <td class="text-right">${(t0!=null&&t1!=null)?yoyBadge(yoy(t0,t1)):'<span style="color:var(--text3)">―</span>'}</td>
+      <td class="text-right" style="color:#1565C0">${val(0,i,'west_sales')==null?'―':fmt(val(0,i,'west_sales'))}</td>
+      <td class="text-right" style="color:#E65100">${val(0,i,'south_sales')==null?'―':fmt(val(0,i,'south_sales'))}</td>
+    </tr>`;
+  }).join('');
+
+  // 曜日別平均
+  const dow = dowRes?.dow || [];
+  const dowMaxTotal = Math.max(0,...dow.map(d=>d.avg_total));
+  const dowTable = dow.map(d=>{
+    const bar = dowMaxTotal? Math.round(d.avg_total/dowMaxTotal*100):0;
+    return `<tr>
+      <td class="left fw-bold">${d.dow}</td>
+      <td class="text-right">${fmt(d.avg_total)}</td>
+      <td class="text-right" style="color:#1565C0">${fmt(d.avg_west)}</td>
+      <td class="text-right" style="color:#E65100">${fmt(d.avg_south)}</td>
+      <td class="text-right" style="color:var(--text3)">${d.count}日</td>
+    </tr>`;
+  }).join('');
+
+  // 店舗構成比（今年）
+  const wSum=yWest(0), sSum=ySouth(0), tSum=yTotal(0);
+  const oSum=Math.max(0, tSum - wSum - sSum);
+  const pct = v => tSum? Math.round(v/tSum*1000)/10 : 0;
+
+  document.getElementById('content').innerHTML = `
+    <div class="print-header"><h2>惣菜部 出荷分析</h2><p>${yrs[0]}年（前年・前前年比較）</p></div>
+    <div class="no-print btn-group mb-16">
+      ${yearPicker}
+      <span class="text-muted" style="font-size:12px;align-self:center">出荷計画づくりのための売上トレンド分析</span>
+      <div style="margin-left:auto"><button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 印刷</button></div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-label">${yrs[0]}年 売上</div><div class="kpi-value green">${fmt(yTotal(0))}</div>
+        <div class="kpi-sub">前年比 ${yoyBadge(yoy(yTotal(0),yTotal(1)))}</div></div>
+      <div class="kpi"><div class="kpi-label">${yrs[1]}年 売上</div><div class="kpi-value" style="color:${COL[1]}">${fmt(yTotal(1))}</div>
+        <div class="kpi-sub">前年比 ${yoyBadge(yoy(yTotal(1),yTotal(2)))}</div></div>
+      <div class="kpi"><div class="kpi-label">${yrs[2]}年 売上</div><div class="kpi-value" style="color:${COL[2]}">${fmt(yTotal(2))}</div><div class="kpi-sub">円</div></div>
+      <div class="kpi"><div class="kpi-label">西店（今年）</div><div class="kpi-value" style="color:#1565C0">${fmt(wSum)}</div><div class="kpi-sub">構成比 ${pct(wSum)}%</div></div>
+      <div class="kpi"><div class="kpi-label">南店（今年）</div><div class="kpi-value" style="color:#E65100">${fmt(sSum)}</div><div class="kpi-sub">構成比 ${pct(sSum)}%</div></div>
+      <div class="kpi"><div class="kpi-label">その他（今年）</div><div class="kpi-value" style="color:#9E9E9E">${fmt(oSum)}</div><div class="kpi-sub">構成比 ${pct(oSum)}%</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">月別 売上推移（今年・前年・前前年）</span></div>
+      <div class="card-body">
+        ${legendChips(totalSeries)}
+        ${svgLineChart(totalSeries, monLabels)}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">西店 vs 南店 出荷（売上）比較</span></div>
+      <div class="card-body">
+        ${legendChips(storeSeries)}
+        ${svgLineChart(storeSeries, monLabels)}
+        <div class="text-muted" style="font-size:12px;margin-top:6px">実線＝${yrs[0]}年、破線＝${yrs[1]}年</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">曜日別 平均売上（${yrs[0]}年・出荷計画の目安）</span></div>
+      <div class="card-body">
+        ${legendChips([{name:'西店',color:'#1565C0'},{name:'南店',color:'#E65100'},{name:'その他',color:'#9E9E9E'}])}
+        ${dow.length? svgDowBars(dow) : '<div class="text-muted" style="font-size:13px">データがありません</div>'}
+        <div class="table-wrap" style="margin-top:12px">
+          <table>
+            <thead><tr><th>曜日</th><th>平均売上</th><th style="color:#1565C0">西店</th><th style="color:#E65100">南店</th><th>営業日数</th></tr></thead>
+            <tbody>${dowTable||''}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title">月別 3年比較</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>月</th>
+            <th style="color:${COL[0]}">${yrs[0]}（今年）</th>
+            <th style="color:${COL[1]}">${yrs[1]}（前年）</th>
+            <th style="color:${COL[2]}">${yrs[2]}（前前年）</th>
+            <th>前年比</th>
+            <th style="color:#1565C0">西店(今年)</th>
+            <th style="color:#E65100">南店(今年)</th>
+          </tr></thead>
+          <tbody>${monthTable}</tbody>
+          <tfoot><tr class="fw-bold" style="background:var(--surface2)">
+            <td class="left">合計</td>
+            <td class="text-right" style="color:${COL[0]}">${fmt(yTotal(0))}</td>
+            <td class="text-right" style="color:${COL[1]}">${fmt(yTotal(1))}</td>
+            <td class="text-right" style="color:${COL[2]}">${fmt(yTotal(2))}</td>
+            <td class="text-right">${yoyBadge(yoy(yTotal(0),yTotal(1)))}</td>
+            <td class="text-right" style="color:#1565C0">${fmt(wSum)}</td>
+            <td class="text-right" style="color:#E65100">${fmt(sSum)}</td>
           </tr></tfoot>
         </table>
       </div>
