@@ -1843,6 +1843,37 @@ def yearly_summary():
                'total_bento_sales':total_bento}
     return jsonify({'year':year,'months':months_list,'summary':summary})
 
+@app.route('/api/dow-summary', methods=['GET'])
+def dow_summary():
+    """出荷計画向け：指定年の曜日別（月〜土）平均売上を返す。
+    日報（年間約300行）から集計するため 1000 行上限に収まる。"""
+    year = request.args.get('year')
+    dep = get_dept(); did = dep['id']
+    rows = sb.table('hq_daily_reports').select('date,total_sales,west_sales,south_sales')\
+        .eq('department_id',did).like('date',year+'%').execute().data
+    agg = {i:{'count':0,'total':0,'west':0,'south':0} for i in range(6)}  # Mon=0..Sat=5
+    for r in rows:
+        try:
+            wd = datetime.strptime(r['date'],'%Y-%m-%d').weekday()  # Mon=0..Sun=6
+        except Exception:
+            continue
+        if wd == 6:  # 日曜は対象外
+            continue
+        a = agg[wd]
+        a['count'] += 1
+        a['total'] += r.get('total_sales',0) or 0
+        a['west']  += r.get('west_sales',0)  or 0
+        a['south'] += r.get('south_sales',0) or 0
+    labels = ['月','火','水','木','金','土']
+    dow = []
+    for i in range(6):
+        a = agg[i]; c = a['count']
+        dow.append({'dow':labels[i],'count':c,
+                    'avg_total':int(a['total']/c) if c else 0,
+                    'avg_west': int(a['west']/c)  if c else 0,
+                    'avg_south':int(a['south']/c) if c else 0})
+    return jsonify({'year':year,'dow':dow})
+
 # ─── 印刷用データ ─────────────────────────────
 @app.route('/api/print/shipping-plan', methods=['GET'])
 def print_shipping_plan():
