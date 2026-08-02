@@ -1452,8 +1452,18 @@ def get_daily_report(date_str):
     # 真偽値で見ると「確定解除→再表示」で即座に自動再確定されて解除できなくなる。
     has_snapshot = bool(stored) and (stored.get('actuals_snapshot') is not None)
     if (not feats.get('production')) and date_str < today_jst().isoformat() and not has_snapshot:
-        finalize_report(date_str, did, cfg)
-        return get_daily_report(date_str)
+        # 売上ゼロの日（実績・注文が無い空の日／誤作成後に削除した日）は日報を作らない。
+        # 作ってしまうと営業日数・経費（固定費の日割り）だけが計上され利益がマイナスになるため。
+        calc_check = calc_daily_report(date_str, did, cfg)
+        if calc_check.get('total_sales', 0) > 0:
+            finalize_report(date_str, did, cfg)
+            return get_daily_report(date_str)
+        # 空の日：誤作成された未確定の行が残っていれば削除して自己修復し、
+        # 行なし（データなし）として返す。以降この日付は集計に含まれない。
+        if stored:
+            sb.table('hq_daily_reports').delete().eq('department_id',did).eq('date',date_str).execute()
+        calc_check['no_report'] = True
+        return jsonify(calc_check)
 
     # 当日以降 → 従来通り再計算
     calc = calc_daily_report(date_str, did, cfg, expense_override=stored.get('expense') if stored else None)
@@ -1569,6 +1579,16 @@ def save_daily_report(date_str):
             'profit':d.get('profit',0),'labor_productivity':d.get('labor_productivity',0),'total_hours':d.get('total_hours',0),
             'west_sales':d.get('west_sales',0),'south_sales':d.get('south_sales',0),'other_sales':d.get('other_sales',0),'note':d.get('note','')}
     save_daily_report_row(data)
+    return jsonify({'ok': True})
+
+@app.route('/api/daily-reports/<date_str>', methods=['DELETE'])
+def delete_daily_report(date_str):
+    """誤って作成した日報を完全に削除し、その日付を『日報なし』に戻す。
+    行を消すことで月次・年次の営業日数/経費の日割りからも除外される。
+    売上ゼロの空の日は get で自動再作成しないため、削除が定着する
+    （実績・注文がある日は再度開くと再作成されるが、それは空の日ではない）。"""
+    did = dept_id()
+    sb.table('hq_daily_reports').delete().eq('department_id',did).eq('date',date_str).execute()
     return jsonify({'ok': True})
 
 @app.route('/api/daily-reports/<date_str>/generate', methods=['POST'])
