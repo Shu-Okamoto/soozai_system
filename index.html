@@ -1647,9 +1647,15 @@ async function renderReportPage() {
   await loadInstoreOrders(date);
 
   if (!r || !r.total_sales) {
+    // 保存済みの行が残っている（誤作成の可能性）なら削除ボタンを出す。
+    // no_report は「行なし」を示すサーバーの目印。売上>0で無い確定済み行は誤作成として消せる。
+    const hasRow = r && !r.no_report;
     document.getElementById('content').innerHTML = `
       <div class="alert alert-warn">${date} の日報データがありません。実績入力から「日報を生成する」してください。</div>
-      <button class="btn btn-warn" onclick="showPage('actual')">✏️ 実績入力へ</button>`;
+      <div class="btn-group">
+        <button class="btn btn-warn" onclick="showPage('actual')">✏️ 実績入力へ</button>
+        ${hasRow ? `<button class="btn btn-secondary btn-sm" onclick="deleteReport('${date}')" title="誤って作成した日報を削除し、この日付を「日報なし」に戻す">🗑 この日の日報を削除</button>` : ''}
+      </div>`;
     return;
   }
 
@@ -1876,6 +1882,19 @@ async function unfinalizeReport(date) {
     showToast('対象日が見つかりません', true);
   } else {
     showToast('解除に失敗しました', true);
+  }
+}
+
+// 誤って作成した日報を完全に削除し、その日付を「日報なし」に戻す。
+// 月次・年次の営業日数・経費按分からも除外される。出荷実績のデータは消さない。
+async function deleteReport(date) {
+  if (!confirm(`${date} の日報を削除しますか？\nこの日付を「日報なし」に戻します（月次・年次の集計・経費按分から除外されます）。\n※ 出荷実績のデータ自体は削除されません。`)) return;
+  const res = await fetch(`${API}/daily-reports/${date}`,{method:'DELETE'});
+  if (res.ok) {
+    showToast('日報を削除しました');
+    renderReportPage();
+  } else {
+    showToast('削除に失敗しました', true);
   }
 }
 
