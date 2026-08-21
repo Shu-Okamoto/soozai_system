@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="製造工場">
+  <rect width="64" height="64" rx="14" fill="#3B6E3F"/>
+  <!-- 煙 -->
+  <g fill="#fff" opacity="0.85">
+    <circle cx="16" cy="13.5" r="2.4"/>
+    <circle cx="21" cy="10.5" r="1.7"/>
+  </g>
+  <!-- 工場本体・のこぎり屋根・煙突 -->
+  <g fill="#fff">
+    <rect x="13" y="18" width="6" height="16"/>
+    <path d="M22 34 V27 l7 5 V27 l7 5 V27 l7 5 V27 l7 5 v2 Z"/>
+    <path d="M11 34 h42 v15 a2 2 0 0 1 -2 2 H13 a2 2 0 0 1 -2 -2 Z"/>
+  </g>
+  <!-- 窓 -->
+  <g fill="#3B6E3F">
+    <rect x="16" y="40" width="5" height="7" rx="1"/>
+    <rect x="25" y="40" width="5" height="7" rx="1"/>
+    <rect x="34" y="40" width="5" height="7" rx="1"/>
+    <rect x="43" y="40" width="5" height="7" rx="1"/>
+  </g>
+</svg>
