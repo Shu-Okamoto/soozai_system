@@ -127,6 +127,14 @@ def daily_expense(target_date_str, monthly_fixed_cost=None):
 def index():
     return send_file(os.path.join(os.path.dirname(__file__), 'index.html'))
 
+# favicon（製造工場アイコン）。静的ルートは /<dept_code> より優先されるため、
+# /favicon.ico が index.html に吸われずSVGアイコンを返す。
+@app.route('/favicon.ico')
+@app.route('/favicon.svg')
+def favicon():
+    return send_file(os.path.join(os.path.dirname(__file__), 'favicon.svg'),
+                     mimetype='image/svg+xml')
+
 # 部署別の入口（/mochi, /tsukemono 等）。同じSPAを返し、フロントが URL から部署を判定する。
 # /api/... は2セグメント以上なのでこの単一セグメントのルートには一致しない。
 @app.route('/<dept_code>')
