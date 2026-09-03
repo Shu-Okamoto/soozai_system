@@ -952,25 +952,27 @@ async function renderNextPlanPage() {
   let body = '';
   catOrder.forEach(cat => {
     const catProds = prods.filter(p=>p.category===cat);
-    if (!catProds.length) return;
-    body += `<tr><td class="fw-bold" colspan="${colspan}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ ${cat}</td></tr>`;
+    // 予定数のある商品行だけ生成（空欄行は表示しない）
+    let rows = '';
     catProds.forEach(p => {
+      const rowTotal = chs.reduce((s,ch)=>s+(planMap[p.id]?.[ch.id]||0),0);
+      if (rowTotal <= 0) return;
       const cells = chs.map(ch => {
         const v = planMap[p.id]?.[ch.id] || 0;
         return `<td class="text-center" style="font-size:18px">${v||''}</td>`;
       }).join('');
-      const rowTotal = chs.reduce((s,ch)=>s+(planMap[p.id]?.[ch.id]||0),0);
-      body += `<tr>
+      rows += `<tr>
         <td class="left" style="white-space:nowrap">${p.name}</td>
         <td style="color:var(--text3);font-size:15px;white-space:nowrap">¥${p.price.toLocaleString()}</td>
         ${cells}
-        <td class="fw-bold" style="background:#F0F7F0">${rowTotal||''}</td>
+        <td class="fw-bold" style="background:#F0F7F0">${rowTotal}</td>
       </tr>`;
     });
-    if (cat === orderRowsCat()) {
-      body += buildInstoreOrderRows(chs, 'plan');
-      body += buildBentoOrderRows(chs, 'plan');
-    }
+    const orderRows = (cat === orderRowsCat())
+      ? (buildInstoreOrderRows(chs, 'plan') + buildBentoOrderRows(chs, 'plan')) : '';
+    if (!rows && !orderRows) return;   // 表示行が無い分類は見出しごと省略
+    body += `<tr><td class="fw-bold" colspan="${colspan}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ ${cat}</td></tr>`;
+    body += rows + orderRows;
   });
 
   const deliveryCh   = chs.find(c => c.name === '配達');
