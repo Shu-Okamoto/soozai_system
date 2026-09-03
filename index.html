@@ -2499,26 +2499,23 @@ function checklistPeriodKey(mode){ return currentDate; }
 function switchChecklist(mode){ checklistMode = mode; renderChecklistPage(); }
 
 async function renderChecklistPage() {
-  // チェックリストの記録は当日のみ。日々のチェックリストは過去日を閲覧のみ可（編集不可）。
-  // 翌日以降は開けない。衛生作業リストは当日のみ。
+  // チェックリストは当日のみ記録可。過去日は日々・衛生作業リストとも閲覧のみ。
+  // 翌日以降は開けない。
   const clToday = realToday();
   const readOnly = currentDate < clToday;
-  if (currentDate > clToday || (readOnly && checklistMode === 'sanitation')) {
-    const msg = currentDate > clToday
-      ? `チェックリストは<strong>当日（${clToday}）のみ</strong>記録できます。翌日以降は開けません。`
-      : `衛生作業リストは<strong>当日（${clToday}）のみ</strong>操作できます。`;
+  if (currentDate > clToday) {
     document.getElementById('content').innerHTML = `
       <div class="card"><div class="card-body" style="text-align:center;padding:48px 24px">
         <div style="font-size:40px;margin-bottom:12px">✅</div>
         <div style="font-size:15px;line-height:1.7;margin-bottom:20px">
-          ${msg}<br>
+          チェックリストは<strong>当日（${clToday}）のみ</strong>記録できます。翌日以降は開けません。<br>
           選択中の日付：<strong>${currentDate}</strong>
         </div>
         <button class="btn btn-primary" onclick="setGlobalDate(realToday());showPage('checklist')">当日のチェックリストを開く</button>
       </div></div>`;
     return;
   }
-  if (checklistMode === 'sanitation') return renderSanitationPage();
+  if (checklistMode === 'sanitation') return renderSanitationPage(readOnly);
   setLoading();
   const mode       = checklistMode;
   const periodKey  = checklistPeriodKey(mode);
@@ -2617,7 +2614,8 @@ function daysSince(dateStr){
   return Math.floor((today - d0) / 86400000);
 }
 
-async function renderSanitationPage() {
+async function renderSanitationPage(readOnly) {
+  if (readOnly === undefined) readOnly = currentDate < realToday();
   setLoading();
   const latest = await fetch(`${API}/sanitation`).then(r=>r.json()).catch(()=>({})) || {};
   window._sanitationLatest = latest;
@@ -2638,7 +2636,7 @@ async function renderSanitationPage() {
           <span style="display:inline-block;min-width:36px;text-align:center;font-size:11px;font-weight:700;color:var(--text2);border:1px solid var(--border);border-radius:6px;padding:2px 0">${freq.label}</span>
           <span style="flex:1;font-size:14px;line-height:1.4">${esc(it.label)}</span>
           <span style="min-width:200px;text-align:right">${statusHtml}</span>
-          <button class="btn btn-primary" style="padding:6px 16px;flex-shrink:0" onclick="doSanitation('${it.key}')">実施</button>
+          ${readOnly ? '' : `<button class="btn btn-primary" style="padding:6px 16px;flex-shrink:0" onclick="doSanitation('${it.key}')">実施</button>`}
         </div>`;
     }).join('');
     return `<div class="card mb-16">
@@ -2658,18 +2656,21 @@ async function renderSanitationPage() {
         <button class="btn btn-secondary" onclick="switchChecklist('daily')">📅 日々のチェックリスト</button>
         <button class="btn btn-primary" onclick="switchChecklist('sanitation')">🧽 衛生作業リスト</button>
       </div>
+      ${readOnly?`<div class="alert alert-warn mb-16" style="display:flex;align-items:center;gap:8px">
+        🔒 過去日（${currentDate}）は<strong>閲覧のみ</strong>です。実施記録は当日のみ可能です。
+      </div>`:''}
       <div class="card mb-16">
         <div class="card-body" style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between">
           <div style="font-size:14px;color:var(--text2)">
-            週間・月1衛生作業（基準日：<strong style="color:var(--text)">${currentDate}</strong>）
+            週間・月1衛生作業（最終実施状況）
             ${overdue>0
               ? `<span style="margin-left:8px;color:var(--danger);font-weight:700">要実施 ${overdue}件 ⚠️</span>`
               : `<span style="margin-left:8px;color:var(--accent);font-weight:700">すべて実施済み ✓</span>`}
           </div>
-          <div style="display:flex;align-items:center;gap:8px">
+          ${readOnly?'':`<div style="display:flex;align-items:center;gap:8px">
             <label style="font-size:13px;color:var(--text2)">実施者</label>
             <select id="sanitation-by" style="min-width:150px">${memberOpts}</select>
-          </div>
+          </div>`}
         </div>
       </div>
       ${groups}
