@@ -151,6 +151,7 @@
       <div class="nav-label">日次業務</div>
       <button class="nav-item active" onclick="showPage('plan')"   id="nav-plan">📋 出荷指示書</button>
       <button class="nav-item"        onclick="showPage('actual')" id="nav-actual">✏️ 出荷実績入力</button>
+      <button class="nav-item"        onclick="showPage('nextplan')" id="nav-nextplan">🗓 明日の予定</button>
       <button class="nav-item"        onclick="showPage('report')" id="nav-report">📊 売上日報</button>
       <button class="nav-item"        onclick="showPage('menu')"   id="nav-menu">🍱 週間献立表</button>
       <button class="nav-item"        onclick="showPage('order')"  id="nav-order">🛒 発注</button>
@@ -343,7 +344,7 @@ function applyDeptFeatures() {
   if (pickles) {
     // 弁当の売上入力フロー（出荷指示書/実績/売上日報/出荷計画）は隠す。
     // 月次・年次は残す（製造数ベースで集計して表示）。
-    ['nav-plan','nav-actual','nav-report','nav-adminplan']
+    ['nav-plan','nav-actual','nav-nextplan','nav-report','nav-adminplan']
       .forEach(id => { const e = document.getElementById(id); if (e) e.style.display = 'none'; });
     // マスタ以外（請求書・分析）はメンバーにも表示する（admin-only を上書き）。
     ['nav-invoice','navgroup-analysis','nav-monthly','nav-yearly','nav-shipanalysis']
@@ -414,6 +415,9 @@ function applyRole(role) {
   // メンバーは「出荷指示書」を非表示（実績入力中心の導線）。管理者は表示。
   const navPlan = document.getElementById('nav-plan');
   if (navPlan) navPlan.style.display = isAdmin ? '' : 'none';
+  // 「明日の予定」（閲覧専用の出荷予定表）はメンバーのみ表示。管理者は出荷指示書で編集可のため非表示。
+  const navNextPlan = document.getElementById('nav-nextplan');
+  if (navNextPlan) navNextPlan.style.display = isAdmin ? 'none' : '';
   document.getElementById('role-label').textContent =
     (isAdmin ? '🔧 管理者' : '👤 メンバー') + '　切り替え';
 }
@@ -599,6 +603,50 @@ function realToday() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
+function dateStr(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+
+// ── 日本の祝日（名前付き祝日の基本リスト。振替休日は下で自動計算）──
+// ※ 現行年（2026）は正確。将来年は暫定のため、必要に応じて更新可。日付選択で調整も可能。
+const JP_HOLIDAYS_BASE = [
+  // 2025
+  '2025-01-01','2025-01-13','2025-02-11','2025-02-23','2025-03-20','2025-04-29',
+  '2025-05-03','2025-05-04','2025-05-05','2025-07-21','2025-08-11','2025-09-15',
+  '2025-09-23','2025-10-13','2025-11-03','2025-11-23',
+  // 2026
+  '2026-01-01','2026-01-12','2026-02-11','2026-02-23','2026-03-20','2026-04-29',
+  '2026-05-03','2026-05-04','2026-05-05','2026-07-20','2026-08-11','2026-09-21',
+  '2026-09-22','2026-09-23','2026-10-12','2026-11-03','2026-11-23',
+  // 2027
+  '2027-01-01','2027-01-11','2027-02-11','2027-02-23','2027-03-21','2027-04-29',
+  '2027-05-03','2027-05-04','2027-05-05','2027-07-19','2027-08-11','2027-09-20',
+  '2027-09-23','2027-10-11','2027-11-03','2027-11-23',
+  // 2028
+  '2028-01-01','2028-01-10','2028-02-11','2028-02-23','2028-03-20','2028-04-29',
+  '2028-05-03','2028-05-04','2028-05-05','2028-07-17','2028-08-11','2028-09-18',
+  '2028-09-22','2028-10-09','2028-11-03','2028-11-23',
+];
+// 振替休日を加えた全祝日セット（日曜が祝日なら次の非祝日を休みにする）
+const JP_HOLIDAYS = (() => {
+  const base = new Set(JP_HOLIDAYS_BASE);
+  const full = new Set(JP_HOLIDAYS_BASE);
+  JP_HOLIDAYS_BASE.forEach(s => {
+    const d = new Date(s + 'T00:00:00');
+    if (d.getDay() === 0) {                 // 日曜の祝日 → 振替休日
+      const s2 = new Date(d);
+      do { s2.setDate(s2.getDate()+1); } while (base.has(dateStr(s2)));
+      full.add(dateStr(s2));
+    }
+  });
+  return full;
+})();
+function isHoliday(d){ return JP_HOLIDAYS.has(dateStr(d)); }
+function isClosedDay(d){ return d.getDay() === 0 || isHoliday(d); }   // 日曜・祝日は休業
+// 翌営業日（＝明日。日曜・祝日はスキップして翌々日以降）
+function nextBusinessDayStr(fromStr){
+  const d = new Date(fromStr + 'T00:00:00');
+  do { d.setDate(d.getDate()+1); } while (isClosedDay(d));
+  return dateStr(d);
+}
 function setGlobalDate(dateStr) {
   currentDate = dateStr;
   const el = document.getElementById('global-date');
@@ -637,9 +685,9 @@ function showPage(page) {
   }
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
-  const titles = {plan:'出荷指示書',actual:'出荷実績入力',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:(deptFeatures().production?'請求先マスタ':'出荷先マスタ'),orderproducts:'発注商品マスタ',suppliers:'業者マスタ',pricelist:'単価表マスタ',deliverydests:'納品先マスタ',issuer:'自社情報マスタ',members:'メンバーマスタ',production:'製造日報',inventory:'在庫',shipments:'出荷登録',specs:'商品規格書',invoice:'請求書',shipplan:'出荷分析',shipanalysis:'売上分析',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成',import:'売上実績取込'};
+  const titles = {plan:'出荷指示書',actual:'出荷実績入力',nextplan:'明日の予定',report:'売上日報',menu:'週間献立表',order:'発注',checklist:'チェックリスト',monthly:'月次サマリ',yearly:'年次サマリ',master:'商品マスタ',categories:'カテゴリマスタ',channels:(deptFeatures().production?'請求先マスタ':'出荷先マスタ'),orderproducts:'発注商品マスタ',suppliers:'業者マスタ',pricelist:'単価表マスタ',deliverydests:'納品先マスタ',issuer:'自社情報マスタ',members:'メンバーマスタ',production:'製造日報',inventory:'在庫',shipments:'出荷登録',specs:'商品規格書',invoice:'請求書',shipplan:'出荷分析',shipanalysis:'売上分析',adminplan:'出荷計画',adminmenu:'献立作成',adminshifts:'シフト作成',import:'売上実績取込'};
   document.getElementById('page-title').textContent = titles[page]||'';
-  ({plan:renderPlanPage,actual:renderActualPage,report:renderReportPage,
+  ({plan:renderPlanPage,actual:renderActualPage,nextplan:renderNextPlanPage,report:renderReportPage,
     menu:renderMenuPage,order:renderOrderPage,checklist:renderChecklistPage,monthly:renderMonthlyPage,yearly:renderYearlyPage,master:renderMasterPage,categories:renderCategoriesPage,channels:renderChannelsPage,orderproducts:renderOrderProductsPage,suppliers:renderSuppliersPage,pricelist:renderPriceListPage,deliverydests:renderDeliveryDestPage,issuer:renderIssuerPage,members:renderMembersPage,
     production:renderProductionPage,inventory:renderInventoryPage,shipments:renderShipmentsPage,specs:renderSpecsPage,invoice:renderInvoicePage,shipplan:renderShipPlanAnalysisPage,shipanalysis:renderShipAnalysisPage,
     adminplan:renderAdminPlanPage,adminmenu:renderAdminMenuPage,adminshifts:renderAdminShiftsPage,import:renderImportPage})[page]?.();
@@ -870,6 +918,97 @@ async function renderPlanPage() {
     </div>
   `;
   updateRiceCalc();
+}
+
+// ═══════════════════════════════════════════════
+// 明日の予定（メンバー向け：閲覧専用の出荷予定表）
+//   ・初期表示は翌営業日（日曜・祝日はスキップ＝翌々日以降）
+//   ・日付選択可・編集不可
+// ═══════════════════════════════════════════════
+let nextPlanDate = null;
+async function renderNextPlanPage() {
+  setLoading();
+  if (!nextPlanDate) nextPlanDate = nextBusinessDayStr(realToday());
+  const date = nextPlanDate;
+  const plans = await fetch(`${API}/shipping-plans?date_from=${date}&date_to=${date}`).then(r=>r.json()).catch(()=>[]);
+  await loadBentoOrders(date);
+  await loadInstoreOrders(date);
+
+  const planMap = {}; // planMap[pid][cid] = qty
+  plans.forEach(p => {
+    if (!planMap[p.product_id]) planMap[p.product_id] = {};
+    planMap[p.product_id][p.channel_id] = p.planned_qty;
+  });
+
+  const prods = cachedProducts;
+  const chs   = cachedChannels;
+  const dt    = new Date(date + 'T00:00:00');
+  const DOWJ  = '日月火水木金土'[dt.getDay()];
+  const closed = isClosedDay(dt);
+
+  const chHeader = chs.map(ch=>`<th style="min-width:58px">${ch.name}</th>`).join('') + '<th style="min-width:52px;background:#E8F0E8">合計</th>';
+  const catOrder = getCatOrder();
+  const colspan  = 2 + chs.length + 1;
+  let body = '';
+  catOrder.forEach(cat => {
+    const catProds = prods.filter(p=>p.category===cat);
+    if (!catProds.length) return;
+    body += `<tr><td class="fw-bold" colspan="${colspan}" style="background:var(--accent-light);color:var(--accent);font-size:11px;padding:3px 10px;text-align:left">▶ ${cat}</td></tr>`;
+    catProds.forEach(p => {
+      const cells = chs.map(ch => {
+        const v = planMap[p.id]?.[ch.id] || 0;
+        return `<td class="text-center" style="font-size:18px">${v||''}</td>`;
+      }).join('');
+      const rowTotal = chs.reduce((s,ch)=>s+(planMap[p.id]?.[ch.id]||0),0);
+      body += `<tr>
+        <td class="left" style="white-space:nowrap">${p.name}</td>
+        <td style="color:var(--text3);font-size:15px;white-space:nowrap">¥${p.price.toLocaleString()}</td>
+        ${cells}
+        <td class="fw-bold" style="background:#F0F7F0">${rowTotal||''}</td>
+      </tr>`;
+    });
+    if (cat === orderRowsCat()) {
+      body += buildInstoreOrderRows(chs, 'plan');
+      body += buildBentoOrderRows(chs, 'plan');
+    }
+  });
+
+  const deliveryCh   = chs.find(c => c.name === '配達');
+  const deliveryChId = deliveryCh ? deliveryCh.id : null;
+  const instoreColSum = ch => cachedInstoreOrders.filter(o=>o.store_id===ch.id).reduce((s,o)=>s+(o.quantity||0),0);
+  const bentoColSum   = ch => (deliveryChId !== null && ch.id === deliveryChId)
+    ? cachedBentoOrders.reduce((s,o)=>s+(o.quantity||0),0) : 0;
+  const colTotals = chs.map(ch => prods.reduce((s,p)=>s+(planMap[p.id]?.[ch.id]||0),0) + instoreColSum(ch) + bentoColSum(ch));
+  const grand = colTotals.reduce((s,v)=>s+v,0);
+  body += `<tr style="background:var(--surface2)">
+    <td class="fw-bold left" colspan="2" style="font-size:12px">合　計</td>
+    ${colTotals.map(t=>`<td class="fw-bold" style="background:#E8F0E8">${t||''}</td>`).join('')}
+    <td class="fw-bold" style="background:#D4EDDA">${grand||''}</td>
+  </tr>`;
+
+  const hasPlan = plans.length>0 || grand>0;
+  const nextStr = nextBusinessDayStr(realToday());
+
+  document.getElementById('content').innerHTML = `
+    <div class="no-print btn-group mb-16" style="align-items:center;flex-wrap:wrap;gap:8px">
+      <label style="font-size:13px;color:var(--text2)">対象日</label>
+      <input type="date" value="${date}" onchange="nextPlanDate=this.value;renderNextPlanPage()" style="font-size:14px">
+      ${date!==nextStr ? `<button class="btn btn-secondary btn-sm" onclick="nextPlanDate='${nextStr}';renderNextPlanPage()">明日（${nextStr.slice(5).replace('-','/')}）に戻す</button>` : ''}
+      <span style="font-size:12px;color:var(--warn);font-weight:600">🔒 閲覧のみ（編集はできません）</span>
+      <div style="margin-left:auto"><button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 印刷</button></div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">${date}（${DOWJ}）の出荷予定${closed?'　<span style="color:var(--warn);font-size:12px">※ 休業日（日曜・祝日）</span>':''}</span>
+        <span class="text-muted" style="font-size:12px">行：商品　列：出荷先</span>
+      </div>
+      ${hasPlan ? `<div class="table-wrap">
+        <table>
+          <thead><tr><th style="min-width:130px;text-align:left">品名</th><th style="min-width:56px">価格</th>${chHeader}</tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>` : `<div class="card-body"><div class="text-muted" style="font-size:14px;padding:20px 4px">${date} の出荷予定はまだ登録されていません。</div></div>`}
+    </div>`;
 }
 
 // 計算チップ（部署別）。弁当=炊飯量/三色等、餅=白/よもぎ/きび/升もち、漬物=なし。
