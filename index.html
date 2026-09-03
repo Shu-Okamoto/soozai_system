@@ -962,7 +962,7 @@ async function renderNextPlanPage() {
         return `<td class="text-center" style="font-size:18px">${v||''}</td>`;
       }).join('');
       rows += `<tr>
-        <td class="left" style="white-space:nowrap">${p.name}</td>
+        <td class="left" style="white-space:nowrap">${p.name}<input type="number" data-pid="${p.id}" data-cid="0" value="${rowTotal}" style="display:none"></td>
         <td style="color:var(--text3);font-size:15px;white-space:nowrap">¥${p.price.toLocaleString()}</td>
         ${cells}
         <td class="fw-bold" style="background:#F0F7F0">${rowTotal}</td>
@@ -999,6 +999,8 @@ async function renderNextPlanPage() {
       <span style="font-size:12px;color:var(--warn);font-weight:600">🔒 閲覧のみ（編集はできません）</span>
       <div style="margin-left:auto"><button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 印刷</button></div>
     </div>
+    ${hasPlan ? `<div class="no-print" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">${calcChipsScreen()}</div>
+    <div class="print-only" style="margin-bottom:8px">${calcChipsPrint()}</div>` : ''}
     <div class="card">
       <div class="card-header">
         <span class="card-title">${date}（${DOWJ}）の出荷予定${closed?'　<span style="color:var(--warn);font-size:12px">※ 休業日（日曜・祝日）</span>':''}</span>
@@ -1010,6 +1012,7 @@ async function renderNextPlanPage() {
         </table>
       </div>` : `<div class="card-body"><div class="text-muted" style="font-size:14px;padding:20px 4px">${date} の出荷予定はまだ登録されていません。</div></div>`}
     </div>`;
+  updateRiceCalc();   // 白米・三色等（餅部は白/よもぎ等）のバッジを集計表示
 }
 
 // 計算チップ（部署別）。弁当=炊飯量/三色等、餅=白/よもぎ/きび/升もち、漬物=なし。
