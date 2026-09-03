@@ -1002,7 +1002,6 @@ async function renderNextPlanPage() {
     <div class="card">
       <div class="card-header">
         <span class="card-title">${date}（${DOWJ}）の出荷予定${closed?'　<span style="color:var(--warn);font-size:12px">※ 休業日（日曜・祝日）</span>':''}</span>
-        <span class="text-muted" style="font-size:12px">行：商品　列：出荷先</span>
       </div>
       ${hasPlan ? `<div class="table-wrap">
         <table>
