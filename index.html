@@ -4128,8 +4128,10 @@ async function renderShipmentsPage() {
   setLoading();
   const month = currentDate.slice(0,7);
   const last = new Date(+month.slice(0,4), +month.slice(5,7), 0).getDate();
+  const mEnd = `${month}-${String(last).padStart(2,'0')}`;
   const [ships, inv] = await Promise.all([
-    fetch(`${API}/shipments?from=${month}-01&to=${month}-${String(last).padStart(2,'0')}`).then(r=>r.json()).catch(()=>[]),
+    // 登録日 or 納品予定日 がその月の出荷を取得（売上分析＝納品日ベースに出る行も一覧・削除可に）
+    fetch(`${API}/shipments?from=${month}-01&to=${mEnd}&dfrom=${month}-01&dto=${mEnd}`).then(r=>r.json()).catch(()=>[]),
     fetch(`${API}/inventory`).then(r=>r.json()).catch(()=>[]),
   ]);
   inventoryAvailMap = {}; (inv.items||[]).forEach(r => inventoryAvailMap[r.product_id] = r.available);
