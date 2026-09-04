@@ -4450,6 +4450,24 @@ async function submitShipments() {
     delivery_date: document.getElementById('sh-ddate').value,
     channel_id, dest_id, dest_name, items
   };
+  // 重複警告：同じ請求先・納品先・納品予定日で、既に同じ商品の出荷があれば確認する。
+  // （数量・単価だけ直したい「修正のつもりの再登録」を二重登録にしないため）
+  const existing = window._shipList || [];
+  const dupNames = [];
+  items.forEach(it => {
+    if (it.item_type === 'freight') return;
+    const dup = existing.some(s => s.channel_id===channel_id
+      && (s.dest_name||'')===(dest_name||'')
+      && (s.delivery_date||'')===(body.delivery_date||'')
+      && s.product_id===it.product_id);
+    if (dup) { const p=(cachedProducts||[]).find(x=>x.id===it.product_id); dupNames.push(p?p.name:('商品'+it.product_id)); }
+  });
+  if (dupNames.length && !confirm(
+      `同じ納品先・納品予定日で、すでに登録済みの商品があります：\n・${dupNames.join('\n・')}\n\n`
+      + `このまま登録すると「修正」ではなく新規に追加され、二重登録になります。\n`
+      + `数量・単価だけ直したい場合は、下の一覧の「修正」ボタンをお使いください。\n\nこのまま追加登録しますか？`)) {
+    return;
+  }
   _shipSubmitting = true;
   const btn = document.querySelector('button[onclick="submitShipments()"]');
   if (btn) btn.disabled = true;
