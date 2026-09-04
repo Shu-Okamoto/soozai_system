@@ -609,8 +609,26 @@ def add_shipments_bulk():
         rows.append({**common,'product_id':pid,'item_type':'product','qty':qty,'unit_price':up or 0})
     if not rows:
         return jsonify({'ok': False, 'error': '商品が選択されていません'}), 400
-    sb.table('hq_shipments').insert(rows).execute()
-    return jsonify({'ok': True, 'count': len(rows)})
+    # 二重送信対策（連打・再送）：同じ登録日・請求先・納品予定日・納品先の
+    # 既存「登録済」明細と完全一致（商品/送料・数量・単価）する行はスキップする。
+    existing = sb.table('hq_shipments').select('product_id,item_type,qty,unit_price')\
+        .eq('department_id',did).eq('order_date',common['order_date'])\
+        .eq('channel_id',ch).eq('delivery_date',common['delivery_date'])\
+        .eq('dest_name',common['dest_name']).eq('status','registered').execute().data or []
+    def _key(r):
+        return (r.get('product_id'), r.get('item_type') or 'product', r.get('qty'), r.get('unit_price'))
+    avail = {}
+    for r in existing:
+        k = _key(r); avail[k] = avail.get(k, 0) + 1
+    to_insert, skipped = [], 0
+    for row in rows:
+        k = _key(row)
+        if avail.get(k, 0) > 0:      # 既存1件と相殺し、重複分のみスキップ
+            avail[k] -= 1; skipped += 1; continue
+        to_insert.append(row)
+    if to_insert:
+        sb.table('hq_shipments').insert(to_insert).execute()
+    return jsonify({'ok': True, 'count': len(to_insert), 'skipped': skipped})
 
 @app.route('/api/shipments/<int:sid>', methods=['PUT'])
 def update_shipment(sid):
