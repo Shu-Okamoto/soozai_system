@@ -541,11 +541,22 @@ def _price_for(did, channel_id, product_id):
 @app.route('/api/shipments', methods=['GET'])
 def get_shipments():
     did = dept_id()
+    a = request.args
     q = sb.table('hq_shipments').select('*').eq('department_id',did)
-    if request.args.get('from'):       q = q.gte('order_date', request.args['from'])
-    if request.args.get('to'):         q = q.lte('order_date', request.args['to'])
-    if request.args.get('status'):     q = q.eq('status', request.args['status'])
-    if request.args.get('channel_id'): q = q.eq('channel_id', request.args['channel_id'])
+    ofrom, oto = a.get('from'), a.get('to')
+    dfrom, dto = a.get('dfrom'), a.get('dto')
+    if ofrom and oto and dfrom and dto:
+        # 登録日 or 納品予定日 のいずれかがその月に入る出荷を返す。
+        # （売上分析＝納品予定日ベースに出る行も、この月の一覧で削除・修正できるようにする）
+        q = q.or_(f'and(order_date.gte.{ofrom},order_date.lte.{oto}),'
+                  f'and(delivery_date.gte.{dfrom},delivery_date.lte.{dto})')
+    else:
+        if ofrom: q = q.gte('order_date', ofrom)
+        if oto:   q = q.lte('order_date', oto)
+        if dfrom: q = q.gte('delivery_date', dfrom)
+        if dto:   q = q.lte('delivery_date', dto)
+    if a.get('status'):     q = q.eq('status', a['status'])
+    if a.get('channel_id'): q = q.eq('channel_id', a['channel_id'])
     return jsonify(q.order('order_date', desc=True).order('id', desc=True).execute().data)
 
 @app.route('/api/shipments', methods=['POST'])
