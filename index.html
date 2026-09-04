@@ -4683,6 +4683,14 @@ async function renderShipAnalysisPage() {
   drawShipAnalysis();
 }
 
+// 売上分析の明細から直接、不要な出荷（編集前の残骸・重複など）を削除する。
+async function deleteShipmentFromAnalysis(id) {
+  if (!confirm('この出荷を削除しますか？\n売上分析・出荷登録の両方から除かれます。')) return;
+  const r = await fetch(`${API}/shipments/${id}`, {method:'DELETE'}).then(r=>r.json()).catch(()=>null);
+  if (r?.ok) { showToast('削除しました'); renderShipAnalysisPage(); }
+  else showToast('削除失敗', true);
+}
+
 function shipAnalysisRows(items, label, idKey) {
   const total = items.reduce((a,b)=>a+b.amount,0) || 1;
   return items.map(it=>`
@@ -4713,16 +4721,18 @@ function drawShipAnalysis() {
         <td class="text-right">¥${fmt(l.unit_price)}</td>
         <td class="text-right">¥${fmt(l.amount)}</td>
         <td class="text-center">${l.status==='shipped'?'出荷済':'登録済'}</td>
+        <td class="text-center no-print">${l.id?`<button class="btn btn-secondary btn-sm" style="color:var(--danger)" onclick="deleteShipmentFromAnalysis(${l.id})">削除</button>`:''}</td>
       </tr>`).join('');
     body.innerHTML = `
-      <div class="card"><div class="card-header"><span class="card-title">日別明細（納品日）</span></div>
+      <div class="card"><div class="card-header"><span class="card-title">日別明細（納品日）</span>
+        <span class="text-muted no-print" style="font-size:12px">不要な行はここで削除できます</span></div>
       <div class="table-wrap"><table>
-        <thead><tr><th>納品日</th><th style="text-align:left">取引先</th><th style="text-align:left">納品先</th><th style="text-align:left">商品</th><th>数量</th><th>単価</th><th>金額</th><th>状態</th></tr></thead>
+        <thead><tr><th>納品日</th><th style="text-align:left">取引先</th><th style="text-align:left">納品先</th><th style="text-align:left">商品</th><th>数量</th><th>単価</th><th>金額</th><th>状態</th><th class="no-print">操作</th></tr></thead>
         <tbody>${rows}</tbody>
         <tfoot><tr class="fw-bold" style="background:var(--surface2)">
           <td class="left" colspan="4">合計</td>
           <td class="text-right">${fmt(data.total_qty)}</td><td></td>
-          <td class="text-right">¥${fmt(data.total_amount)}</td><td></td>
+          <td class="text-right">¥${fmt(data.total_amount)}</td><td></td><td class="no-print"></td>
         </tr></tfoot>
       </table></div></div>`;
     return;
