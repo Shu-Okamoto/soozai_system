@@ -4421,7 +4421,9 @@ function recalcShipWarn() {
   if (warn) warn.textContent = shorts.length ? `⚠️ 在庫不足：${shorts.join('、')}（登録は可能です）` : '';
 }
 
+let _shipSubmitting = false;
 async function submitShipments() {
+  if (_shipSubmitting) return;   // 二重送信（連打）防止
   const channel_id = +document.getElementById('sh-ch').value || null;
   if (!channel_id) { showToast('請求先を選択してください', true); return; }
   const destSel = document.getElementById('sh-dest');
@@ -4448,9 +4450,20 @@ async function submitShipments() {
     delivery_date: document.getElementById('sh-ddate').value,
     channel_id, dest_id, dest_name, items
   };
-  const r = await fetch(`${API}/shipments/bulk`, {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(body)}).then(r=>r.json()).catch(()=>null);
-  if (r?.ok) { showToast(`${r.count}件登録しました`); renderShipmentsPage(); } else showToast(r?.error||'登録失敗', true);
+  _shipSubmitting = true;
+  const btn = document.querySelector('button[onclick="submitShipments()"]');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch(`${API}/shipments/bulk`, {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)}).then(r=>r.json()).catch(()=>null);
+    if (r?.ok) {
+      showToast(`${r.count}件登録しました${r.skipped?`（重複${r.skipped}件はスキップ）`:''}`);
+      renderShipmentsPage();
+    } else showToast(r?.error||'登録失敗', true);
+  } finally {
+    _shipSubmitting = false;
+    if (btn && document.body.contains(btn)) btn.disabled = false;
+  }
 }
 
 async function confirmShip(id) {
