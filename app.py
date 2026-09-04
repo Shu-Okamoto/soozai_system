@@ -757,7 +757,7 @@ def shipment_analysis():
         is_freight = s.get('item_type') == 'freight'
         pname = (s.get('item_name') or '送料') if is_freight else prods.get(pid,'')
         pkey  = 'freight' if is_freight else pid
-        lines.append({'order_date':s['order_date'],'delivery_date':s.get('delivery_date',''),
+        lines.append({'id':s['id'],'order_date':s['order_date'],'delivery_date':s.get('delivery_date',''),
                       'channel_id':cid,'channel_name':chans.get(cid,''),'dest_name':s.get('dest_name',''),
                       'product_id':pid,'product_name':pname,'qty':qty,'unit_price':up,
                       'amount':amt,'status':s['status']})
