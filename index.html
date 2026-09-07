@@ -3128,6 +3128,7 @@ function buildProdRow(p) {
        </select></td>`
     : '';
   return `<tr style="${rowStyle}">
+    <td><input type="number" value="${p.sort_order||0}" id="pso${p.id}" style="width:52px;text-align:center" min="0" title="分類内の並び順（小さいほど上）"></td>
     <td class="left"><input type="text" value="${p.name}" id="pn${p.id}" style="width:150px"></td>
     <td><input type="number" value="${p.price}" id="pp${p.id}" style="width:75px"></td>
     <td><select id="pc${p.id}" style="width:70px" onchange="toggleSubcatCell(${p.id},this.value)">
@@ -3150,7 +3151,7 @@ async function renderMasterPage() {
   const inactiveCount = prods.length - activeCount;
 
   const isPickles = !!deptFeatures().production;
-  const COLS = isPickles ? 7 : 6;
+  const COLS = isPickles ? 8 : 7;
   const catOrder = getCatOrder();
   let rows = '';
   catOrder.forEach(cat => {
@@ -3184,6 +3185,7 @@ async function renderMasterPage() {
       <div class="table-wrap">
         <table>
           <thead><tr>
+            <th style="min-width:56px">並び順</th>
             <th style="text-align:left;min-width:150px">品名</th>
             <th style="min-width:80px">価格（円）</th>
             <th style="min-width:75px">分類</th>
@@ -3246,12 +3248,13 @@ async function updateProduct(id) {
   const price    = parseInt(document.getElementById('pp'+id).value)||0;
   const category = document.getElementById('pc'+id).value;
   const subcategory = document.getElementById('ps'+id)?.value || '';
-  const body = {name,price,category,subcategory,active:1};
+  const sort_order = parseInt(document.getElementById('pso'+id)?.value)||0;
+  const body = {name,price,category,subcategory,active:1,sort_order};
   const ptype = document.getElementById('ptype'+id);
   if (ptype) body.prod_type = ptype.value;
   const r = await fetch(`${API}/products/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(body)}).then(r=>r.json()).catch(()=>null);
-  if (r?.ok) { showToast('更新しました'); cachedProducts=await fetch(API+'/products').then(r=>r.json()); }
+  if (r?.ok) { showToast('更新しました'); cachedProducts=await fetch(API+'/products').then(r=>r.json()); renderMasterPage(); }
   else showToast('更新失敗',true);
 }
 
@@ -3261,8 +3264,9 @@ async function setProductActive(id, active) {
   const price       = parseInt(document.getElementById('pp'+id).value)||0;
   const category    = document.getElementById('pc'+id).value;
   const subcategory = document.getElementById('ps'+id)?.value || '';
+  const sort_order  = parseInt(document.getElementById('pso'+id)?.value)||0;
   const r = await fetch(`${API}/products/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name,price,category,subcategory,active})}).then(r=>r.json()).catch(()=>null);
+    body:JSON.stringify({name,price,category,subcategory,active,sort_order})}).then(r=>r.json()).catch(()=>null);
   if (r?.ok) {
     showToast(active===1 ? '有効化しました' : '無効化しました');
     cachedProducts = await fetch(API+'/products').then(r=>r.json());

@@ -181,15 +181,21 @@ def get_products():
     q = sb.table('hq_products').select('*').eq('department_id', dept_id())
     if request.args.get('include_inactive') != '1':
         q = q.eq('active',1)
-    r = q.order('category').order('id').execute()
+    # 分類→並び順(sort_order)→id の順。sort_order は商品マスタで設定可。
+    r = q.order('category').order('sort_order').order('id').execute()
     return jsonify(r.data)
 
 @app.route('/api/products', methods=['POST'])
 def add_product():
     d = request.json
+    did = dept_id()
+    # 新規は末尾に来るよう sort_order を最大+1 にする
+    mx = sb.table('hq_products').select('sort_order').eq('department_id',did)\
+        .order('sort_order', desc=True).limit(1).execute().data
+    next_order = (mx[0].get('sort_order') or 0) + 1 if mx else 1
     # active はDB既定値に依存せず明示的に 1 を入れる（NULL だと一覧APIの active=1 絞込から漏れ、
     # 商品マスタには出るが実績入力・出荷指示書に出ない不整合が起きる）
-    sb.table('hq_products').insert({'name':d['name'],'price':d['price'],'category':d['category'],'subcategory':d.get('subcategory',''),'prod_type':d.get('prod_type','manufacture'),'active':1,'department_id':dept_id()}).execute()
+    sb.table('hq_products').insert({'name':d['name'],'price':d['price'],'category':d['category'],'subcategory':d.get('subcategory',''),'prod_type':d.get('prod_type','manufacture'),'active':1,'sort_order':d.get('sort_order', next_order),'department_id':did}).execute()
     return jsonify({'ok': True})
 
 @app.route('/api/products/<int:pid>', methods=['PUT'])
@@ -198,6 +204,8 @@ def update_product(pid):
     upd = {'name':d['name'],'price':d['price'],'category':d['category'],'subcategory':d.get('subcategory',''),'active':d.get('active',1)}
     if 'prod_type' in d:
         upd['prod_type'] = d['prod_type']
+    if 'sort_order' in d:
+        upd['sort_order'] = d.get('sort_order') or 0
     sb.table('hq_products').update(upd).eq('id',pid).eq('department_id',dept_id()).execute()
     return jsonify({'ok': True})
 
