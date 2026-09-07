@@ -448,3 +448,8 @@ UPDATE hq_suppliers             SET active = 1 WHERE active IS NULL;
 UPDATE hq_order_products        SET active = 1 WHERE active IS NULL;
 UPDATE hq_delivery_destinations SET active = 1 WHERE active IS NULL;
 UPDATE hq_members               SET active = 1 WHERE active IS NULL;
+
+-- ─── 商品マスタの並び順（惣菜部などで商品マスタからソート順を設定可能に）──
+-- 既存商品は id 順で初期値を採番（分類内は sort_order → id の順で表示）。
+ALTER TABLE hq_products ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
+UPDATE hq_products SET sort_order = id WHERE sort_order IS NULL OR sort_order = 0;
