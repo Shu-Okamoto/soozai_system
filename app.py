@@ -699,11 +699,17 @@ def get_invoices():
     y, m = map(int, month.split('-'))
     last = calendar.monthrange(y, m)[1]
     start, end = f'{month}-01', f'{month}-{last:02d}'
-    q = sb.table('hq_shipments').select('*').eq('department_id',did).eq('status','shipped')\
-        .gte('shipped_date',start).lte('shipped_date',end)
+    # 請求は「納品予定日(=納品日)」の月で計上する。納品予定日が無い出荷は出荷日で補完。
+    # 候補として「納品予定日 or 出荷日 が当月」を取得し、実効日で当月分に絞り込む。
+    q = sb.table('hq_shipments').select('*').eq('department_id',did).eq('status','shipped').or_(
+        f'and(delivery_date.gte.{start},delivery_date.lte.{end}),'
+        f'and(shipped_date.gte.{start},shipped_date.lte.{end})')
     if ch:
         q = q.eq('channel_id', ch)
     ships = q.execute().data
+    def _bill_date(s):
+        return (s.get('delivery_date') or s.get('shipped_date') or '')[:10]
+    ships = [s for s in ships if start <= _bill_date(s) <= end]
     prods = {p['id']:p['name'] for p in sb.table('hq_products').select('id,name').eq('department_id',did).execute().data}
     chans = {c['id']:c for c in sb.table('hq_channels').select('id,name,zip,address').eq('department_id',did).execute().data}
     by = {}

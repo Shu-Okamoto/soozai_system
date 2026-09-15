@@ -4316,7 +4316,7 @@ function toggleAllShipGroups(on) {
 function _promptShipDate() {
   const t = new Date();
   const today = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
-  return prompt('出荷日を入力してください（請求対象月の判定に使います）', today);
+  return prompt('出荷日を入力してください（請求月は納品予定日で判定。納品予定日が無い場合のみ出荷日を使用）', today);
 }
 
 async function shipGroup(key) {
@@ -4491,7 +4491,7 @@ async function submitShipments() {
 async function confirmShip(id) {
   const t = new Date();
   const today = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
-  const shipped = prompt('出荷日を入力してください（請求対象月の判定に使います）', today);
+  const shipped = prompt('出荷日を入力してください（請求月は納品予定日で判定。納品予定日が無い場合のみ出荷日を使用）', today);
   if (shipped === null) return;
   const r = await fetch(`${API}/shipments/${id}/ship`, {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({shipped_date: shipped || today})}).then(r=>r.json()).catch(()=>null);
