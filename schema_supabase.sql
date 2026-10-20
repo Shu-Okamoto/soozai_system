@@ -453,3 +453,25 @@ UPDATE hq_members               SET active = 1 WHERE active IS NULL;
 -- 既存商品は id 順で初期値を採番（分類内は sort_order → id の順で表示）。
 ALTER TABLE hq_products ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
 UPDATE hq_products SET sort_order = id WHERE sort_order IS NULL OR sort_order = 0;
+
+-- ════════════════════════════════════════════════════════════
+-- Data API（PostgREST）アクセス権限の明示付与
+-- 2026-10-30 以降、Supabase は public に新規作成されたテーブルへ
+-- Data API アクセスを自動付与しなくなる。新規プロジェクト・プレビュー
+-- ブランチ・`supabase db reset` 等でスキーマを再作成した際に、権限が
+-- 無いと PostgREST が「permission denied」を返すため、同じマイグレーション
+-- 内で明示的に GRANT しておく（再実行安全）。
+--
+-- 本アプリはバックエンド(app.py)が service_role キーでのみ接続し、フロントは
+-- Flask API 経由でアクセスする（supabase-js/anon は未使用）。public テーブルに
+-- RLS も設定していない。そのため anon/authenticated には付与しない
+-- （付与すると RLS が無いぶん anon キーで全データが読めてしまうため）。
+-- 付与対象はアプリが使う service_role のみとする。
+-- ※ 直接クライアント接続（anon/authenticated）を使う構成に変える場合は、
+--   先に各テーブルで RLS を有効化し、必要なロールにのみ GRANT すること。
+GRANT USAGE ON SCHEMA public TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES    IN SCHEMA public TO service_role;
+GRANT USAGE, SELECT, UPDATE                 ON ALL SEQUENCES IN SCHEMA public TO service_role;
+-- 以降に作成される public のテーブル／シーケンスにも自動付与（将来分）
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES    TO service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE          ON SEQUENCES TO service_role;
