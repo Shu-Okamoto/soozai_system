@@ -5300,7 +5300,7 @@ async function addMember() {
   const wage = parseInt(document.getElementById('new-mw').value) || 0;
   const r = await fetch(`${API}/members`, {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({name, hourly_wage: wage})}).then(r=>r.json()).catch(()=>null);
-  if (r?.ok) { showToast('追加しました'); renderMembersPage(); }
+  if (r?.ok) { showToast('追加しました'); cachedMembers = await fetch(API+'/members').then(r=>r.json()).catch(()=>cachedMembers); renderMembersPage(); }
   else showToast('追加失敗（同名のメンバーが既にある可能性があります）', true);
 }
 
@@ -5310,7 +5310,8 @@ async function updateMember(id) {
   if (!name) { showToast('名前を入力してください', true); return; }
   const r = await fetch(`${API}/members/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({name, hourly_wage: wage, active: 1})}).then(r=>r.json()).catch(()=>null);
-  if (r?.ok) showToast('更新しました'); else showToast('更新失敗', true);
+  if (r?.ok) { showToast('更新しました'); cachedMembers = await fetch(API+'/members').then(r=>r.json()).catch(()=>cachedMembers); }
+  else showToast('更新失敗', true);
 }
 
 async function deleteMember(id) {
@@ -5319,7 +5320,7 @@ async function deleteMember(id) {
   const wage = parseInt(document.getElementById('mw'+id).value) || 0;
   const r = await fetch(`${API}/members/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({name, hourly_wage: wage, active: 0})}).then(r=>r.json()).catch(()=>null);
-  if (r?.ok) { showToast('削除しました'); renderMembersPage(); }
+  if (r?.ok) { showToast('削除しました'); cachedMembers = await fetch(API+'/members').then(r=>r.json()).catch(()=>cachedMembers); renderMembersPage(); }
   else showToast('削除失敗', true);
 }
 
