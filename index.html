@@ -4596,6 +4596,7 @@ async function renderInvoicePage() {
         <select id="inv-ch" onchange="renderInvoiceList()"><option value="">すべて</option>${chOpts}</select>
         <div style="margin-left:auto;display:flex;gap:8px">
           <button class="btn btn-primary btn-sm" onclick="downloadInvoicePdf()">📄 全件PDF</button>
+          <button class="btn btn-secondary btn-sm" onclick="sendAllInvoices()">✉️ 一括メール送信</button>
           <button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 印刷</button>
         </div>
       </div>
@@ -4618,6 +4619,60 @@ function onInvoiceFilterChange(month) {
   currentDate = month + '-01';
   document.getElementById('global-date').value = currentDate;
   renderInvoicePage();
+}
+
+// 請求書メール送信の結果サマリをトーストで表示
+function _invoiceSendSummary(res) {
+  if (!res) { showToast('送信に失敗しました（サーバー応答なし）', true); return; }
+  if (res.error) { showToast(res.error, true); return; }
+  const c = res.counts || {sent:0, skipped:0, failed:0};
+  const parts = [`送信${c.sent}件`];
+  if (c.skipped) parts.push(`スキップ${c.skipped}件`);
+  if (c.failed)  parts.push(`失敗${c.failed}件`);
+  const msg = parts.join(' / ');
+  if (c.failed) {
+    const names = (res.failed||[]).map(f=>`${f.channel_name}: ${f.reason||''}`).join('\n');
+    showToast(msg, true);
+    if (names) alert('送信に失敗した請求先:\n' + names);
+  } else if (c.sent === 0 && c.skipped) {
+    showToast('メール未登録のため送信されませんでした', true);
+  } else {
+    showToast(msg);
+  }
+}
+
+// 1請求先へメール送信
+async function sendOneInvoice(channelId) {
+  const month = document.getElementById('inv-month')?.value || currentDate.slice(0,7);
+  const iv = (window._invoiceCache||[]).find(x => String(x.channel_id) === String(channelId));
+  const name = iv ? iv.channel_name : '';
+  if (!confirm(`${name} へ ${month} 分の請求書をメール送信します。よろしいですか？`)) return;
+  showToast('送信中...');
+  const res = await fetch(`${API}/invoices/send`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({month, channel_id: channelId})
+  }).then(r=>r.json()).catch(()=>null);
+  _invoiceSendSummary(res);
+}
+
+// 当月の全請求先へ一括メール送信
+async function sendAllInvoices() {
+  const month = document.getElementById('inv-month')?.value || currentDate.slice(0,7);
+  const invoices = window._invoiceCache || [];
+  const withEmail = invoices.filter(iv => iv.channel_email);
+  if (!invoices.length) { showToast('対象の請求データがありません', true); return; }
+  if (!withEmail.length) { showToast('メール登録済みの請求先がありません', true); return; }
+  const noEmail = invoices.length - withEmail.length;
+  let msg = `${month} 分の請求書を ${withEmail.length} 件の請求先へメール送信します。`;
+  if (noEmail) msg += `\n（メール未登録の ${noEmail} 件はスキップされます）`;
+  msg += '\nよろしいですか？';
+  if (!confirm(msg)) return;
+  showToast('送信中...');
+  const res = await fetch(`${API}/invoices/send-all`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({month})
+  }).then(r=>r.json()).catch(()=>null);
+  _invoiceSendSummary(res);
 }
 
 function renderInvoiceList() {
@@ -4659,8 +4714,11 @@ function renderInvoiceList() {
     return `
       <div class="card mb-16 invoice-sheet">
         <div class="card-body">
-          <div class="no-print" style="display:flex;justify-content:flex-end;margin-bottom:8px">
+          <div class="no-print" style="display:flex;justify-content:flex-end;gap:8px;align-items:center;margin-bottom:8px">
             <button class="btn btn-primary btn-sm" onclick="downloadInvoicePdf('${iv.channel_id}')">📄 この請求書をPDFダウンロード</button>
+            ${iv.channel_email
+              ? `<button class="btn btn-secondary btn-sm" onclick="sendOneInvoice('${iv.channel_id}')">✉️ メール送信</button>`
+              : `<span class="badge" style="font-size:12px;color:var(--text2)">メール未登録</span>`}
           </div>
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
             <div style="margin-left:32px;margin-top:14px">
