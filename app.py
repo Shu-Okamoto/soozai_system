@@ -690,17 +690,12 @@ def update_issuer():
     return jsonify({'ok': True, 'issuer': issuer})
 
 # ─── 請求書（請求先×月、軽減税率8%・税込）──
-@app.route('/api/invoices', methods=['GET'])
-def get_invoices():
-    did = dept_id()
-    month = request.args.get('month'); ch = request.args.get('channel_id')
-    if not month:
-        return jsonify({'ok': False, 'error': 'month が必要です'}), 400
+def _compute_invoices(did, month, ch=None):
+    """請求先×月の請求データ（納品予定日=納品日ベース）を集計して返す。"""
     y, m = map(int, month.split('-'))
     last = calendar.monthrange(y, m)[1]
     start, end = f'{month}-01', f'{month}-{last:02d}'
     # 請求は「納品予定日(=納品日)」の月で計上する。納品予定日が無い出荷は出荷日で補完。
-    # 候補として「納品予定日 or 出荷日 が当月」を取得し、実効日で当月分に絞り込む。
     q = sb.table('hq_shipments').select('*').eq('department_id',did).eq('status','shipped').or_(
         f'and(delivery_date.gte.{start},delivery_date.lte.{end}),'
         f'and(shipped_date.gte.{start},shipped_date.lte.{end})')
@@ -711,9 +706,9 @@ def get_invoices():
         return (s.get('delivery_date') or s.get('shipped_date') or '')[:10]
     ships = [s for s in ships if start <= _bill_date(s) <= end]
     prods = {p['id']:p['name'] for p in sb.table('hq_products').select('id,name').eq('department_id',did).execute().data}
-    chans = {c['id']:c for c in sb.table('hq_channels').select('id,name,zip,address').eq('department_id',did).execute().data}
+    chans = {c['id']:c for c in sb.table('hq_channels').select('id,name,zip,address,email').eq('department_id',did).execute().data}
     by = {}
-    has_dest = {}   # 請求先ごとに納品先が1件でもあるか
+    has_dest = {}
     for s in ships:
         amt = (s['qty'] or 0) * (s['unit_price'] or 0)
         dest = s.get('dest_name') or ''
@@ -729,7 +724,6 @@ def get_invoices():
             'unit_price':s['unit_price'],'amount':amt,'dest_name':dest})
     out = []
     for cid, lines in by.items():
-        # 納品日(納品予定日) → 納品先 → 商品名 の順に並べる
         lines.sort(key=lambda x:(x['delivery_date'] or x['shipped_date'] or '', x['dest_name'], x['product_name']))
         sub8  = sum(l['amount'] for l in lines if l['tax_rate'] == 8)
         sub10 = sum(l['amount'] for l in lines if l['tax_rate'] == 10)
@@ -739,12 +733,164 @@ def get_invoices():
         tax = tax8 + tax10
         ci = chans.get(cid, {})
         out.append({'channel_id':cid,'channel_name':ci.get('name',''),
-                    'channel_zip':ci.get('zip',''),'channel_address':ci.get('address',''),'month':month,
+                    'channel_zip':ci.get('zip',''),'channel_address':ci.get('address',''),
+                    'channel_email':ci.get('email',''),'month':month,
                     'lines':lines,'subtotal':subtotal,'sub8':sub8,'sub10':sub10,
                     'tax8':tax8,'tax10':tax10,'tax':tax,'total':subtotal+tax,
                     'has_dest':bool(has_dest.get(cid))})
     out.sort(key=lambda x:x['channel_name'])
-    return jsonify(out)
+    return out
+
+@app.route('/api/invoices', methods=['GET'])
+def get_invoices():
+    did = dept_id()
+    month = request.args.get('month'); ch = request.args.get('channel_id')
+    if not month:
+        return jsonify({'ok': False, 'error': 'month が必要です'}), 400
+    return jsonify(_compute_invoices(did, month, ch))
+
+# ─── 請求書PDF生成（ReportLab・日本語フォント埋め込み。システム依存なし）──
+# 非埋め込みCIDフォントだとビューアに日本語フォントが無い環境で空白になるため、
+# Noto Sans JP(OFL) を埋め込む（reportlabが使用字のみサブセット埋め込みしPDFは軽量）。
+_PDF_FONT = 'NotoSansJP'
+_pdf_font_ready = False
+def _ensure_pdf_font():
+    global _pdf_font_ready
+    if not _pdf_font_ready:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        fp = os.path.join(os.path.dirname(__file__), 'fonts', 'NotoSansJP-Regular.ttf')
+        pdfmetrics.registerFont(TTFont(_PDF_FONT, fp))
+        # <b> 等で別名を引いても壊れないよう、太字にも同フォントを割り当てる（強調はサイズで表現）
+        pdfmetrics.registerFontFamily(_PDF_FONT, normal=_PDF_FONT, bold=_PDF_FONT,
+                                      italic=_PDF_FONT, boldItalic=_PDF_FONT)
+        _pdf_font_ready = True
+
+def _yen(n):
+    return f'¥{int(round(n or 0)):,}'
+
+def build_invoices_pdf(invoices, iss, month):
+    """請求書(1件以上)を1つのPDFにして bytes で返す。請求先ごとに改ページ。"""
+    from io import BytesIO
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle, Paragraph,
+                                    Spacer, PageBreak)
+    from reportlab.lib.styles import ParagraphStyle
+    _ensure_pdf_font()
+    F = _PDF_FONT
+    y, m = month.split('-')
+    from datetime import date as _date
+    today = today_jst()
+    issue = f'{today.year}年{today.month}月{today.day}日'
+    small  = ParagraphStyle('s',  fontName=F, fontSize=9,  leading=12)
+    normal = ParagraphStyle('n',  fontName=F, fontSize=10, leading=14)
+    name_s = ParagraphStyle('nm', fontName=F, fontSize=16, leading=20)
+    title  = ParagraphStyle('t',  fontName=F, fontSize=20, leading=24, alignment=2)  # 右寄せ
+    right  = ParagraphStyle('r',  fontName=F, fontSize=9,  leading=12, alignment=2)
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=18*mm, rightMargin=18*mm,
+                            topMargin=15*mm, bottomMargin=15*mm, title='請求書')
+    story = []
+    issuer_name = (iss or {}).get('name') or 'みかわ 漬物部'
+    for idx, iv in enumerate(invoices):
+        if idx:
+            story.append(PageBreak())
+        # 発行元ブロック（右）
+        issuer_html = '<br/>'.join(filter(None, [
+            f'<font size=13><b>{issuer_name}</b></font>',
+            (f'〒{iss.get("zip")}' if iss.get('zip') else ''),
+            (iss.get('address') or ''),
+            (f'TEL: {iss.get("phone")}' if iss.get('phone') else ''),
+            (f'登録番号: {iss.get("reg_no")}' if iss.get('reg_no') else ''),
+            (iss.get('bank') or ''),
+        ]))
+        # 宛先（左）
+        cust_html = '<br/>'.join(filter(None, [
+            (f'〒{iv.get("channel_zip")}' if iv.get('channel_zip') else ''),
+            (iv.get('channel_address') or ''),
+        ]))
+        header = Table([[
+            [Paragraph(cust_html, small) if cust_html else Spacer(1,1),
+             Spacer(1,8),
+             Paragraph(f'{iv["channel_name"]} 御中', name_s)],
+            [Paragraph('請求書', title), Spacer(1,6), Paragraph(issuer_html, right)],
+        ]], colWidths=[95*mm, 79*mm])
+        header.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP')]))
+        story.append(header)
+        story.append(Spacer(1,6))
+        story.append(Paragraph(f'{y}年{m}月分（月末締め）／発行日：{issue}', right))
+        story.append(Spacer(1,6))
+        # 請求金額ボックス
+        amt_box = Table([[Paragraph('ご請求金額（税込）', normal),
+                          Paragraph(f'<b>{_yen(iv["total"])}</b>', ParagraphStyle('big',fontName=F,fontSize=16,alignment=2))]],
+                        colWidths=[120*mm, 54*mm])
+        amt_box.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),colors.Color(0.95,0.95,0.95)),
+                                     ('BOX',(0,0),(-1,-1),0.5,colors.lightgrey),
+                                     ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+                                     ('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8),
+                                     ('LEFTPADDING',(0,0),(0,0),10),('RIGHTPADDING',(-1,0),(-1,0),10)]))
+        story.append(amt_box)
+        story.append(Spacer(1,8))
+        # 明細
+        head = ['納品日','商品名','納品先','数量','単価','金額']
+        rows = [head]
+        for l in iv['lines']:
+            d = (l.get('delivery_date') or l.get('shipped_date') or '')[5:]
+            rows.append([d,
+                         Paragraph(str(l.get('product_name') or ''), small),
+                         Paragraph(str(l.get('dest_name') or '―'), small),
+                         f'{int(l.get("qty") or 0):,}',
+                         _yen(l.get('unit_price')),
+                         _yen(l.get('amount'))])
+        tbl = Table(rows, colWidths=[18*mm, 58*mm, 38*mm, 16*mm, 22*mm, 22*mm], repeatRows=1)
+        ts = [('FONTNAME',(0,0),(-1,-1),F),('FONTSIZE',(0,0),(-1,-1),9),
+              ('GRID',(0,0),(-1,-1),0.4,colors.grey),
+              ('BACKGROUND',(0,0),(-1,0),colors.Color(0.91,0.95,0.91)),
+              ('ALIGN',(3,1),(5,-1),'RIGHT'),('ALIGN',(0,0),(-1,0),'CENTER'),
+              ('ALIGN',(0,1),(0,-1),'CENTER'),
+              ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+              ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3)]
+        tbl.setStyle(TableStyle(ts))
+        story.append(tbl)
+        # 合計
+        foot = [['', '小計（税抜）', _yen(iv['subtotal'])]]
+        if iv.get('tax10'):
+            foot.append(['', f'消費税（軽減税率8%・対象{_yen(iv["sub8"])}）', _yen(iv['tax8'])])
+            foot.append(['', f'消費税（10%・対象{_yen(iv["sub10"])}）', _yen(iv['tax10'])])
+        else:
+            foot.append(['', '消費税（軽減税率8%）', _yen(iv['tax'])])
+        foot.append(['', '合計（税込）', _yen(iv['total'])])
+        ft = Table(foot, colWidths=[94*mm, 58*mm, 22*mm])
+        ft.setStyle(TableStyle([('FONTNAME',(0,0),(-1,-1),F),('FONTSIZE',(0,0),(-1,-1),9),
+                                ('ALIGN',(1,0),(2,-1),'RIGHT'),
+                                ('LINEABOVE',(1,-1),(2,-1),0.6,colors.grey),
+                                ('FONTSIZE',(1,-1),(2,-1),11),
+                                ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3)]))
+        story.append(ft)
+    doc.build(story)
+    return buf.getvalue()
+
+@app.route('/api/invoices/pdf', methods=['GET'])
+def invoice_pdf():
+    did = dept_id()
+    month = request.args.get('month'); ch = request.args.get('channel_id')
+    if not month:
+        return jsonify({'ok': False, 'error': 'month が必要です'}), 400
+    invoices = _compute_invoices(did, month, ch)
+    if not invoices:
+        return jsonify({'ok': False, 'error': '対象の請求データがありません'}), 404
+    dep = get_dept(); iss = (dep.get('config') or {}).get('issuer') or {}
+    pdf = build_invoices_pdf(invoices, iss, month)
+    if ch and len(invoices) == 1:
+        fname = f'請求書_{invoices[0]["channel_name"]}_{month}.pdf'
+    else:
+        fname = f'請求書_{month}.pdf'
+    from io import BytesIO
+    return send_file(BytesIO(pdf), mimetype='application/pdf',
+                     as_attachment=True, download_name=fname)
 
 # ─── 売上分析（納品予定日ベース・漬物部）──────
 @app.route('/api/shipment-analysis', methods=['GET'])

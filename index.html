@@ -4594,13 +4594,24 @@ async function renderInvoicePage() {
           style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-family:inherit">
         <label style="font-size:13px;color:var(--text2)">請求先</label>
         <select id="inv-ch" onchange="renderInvoiceList()"><option value="">すべて</option>${chOpts}</select>
-        <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="window.print()">🖨 印刷 / PDF</button>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" onclick="downloadInvoicePdf()">📄 全件PDF</button>
+          <button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 印刷</button>
+        </div>
       </div>
       <div id="invoice-list"></div>
     </div>`;
   window._invoiceCache = invoices;
   window._invoiceIssuer = issuer || {};
   renderInvoiceList();
+}
+
+// 請求書PDFをダウンロード（channelId 省略で当月の全請求先を1つのPDFに）
+function downloadInvoicePdf(channelId) {
+  const month = document.getElementById('inv-month')?.value || currentDate.slice(0,7);
+  let url = `${API}/invoices/pdf?month=${encodeURIComponent(month)}&dept=${encodeURIComponent(currentDept)}`;
+  if (channelId) url += `&channel_id=${encodeURIComponent(channelId)}`;
+  window.open(url, '_blank');
 }
 
 function onInvoiceFilterChange(month) {
@@ -4648,6 +4659,9 @@ function renderInvoiceList() {
     return `
       <div class="card mb-16 invoice-sheet">
         <div class="card-body">
+          <div class="no-print" style="display:flex;justify-content:flex-end;margin-bottom:8px">
+            <button class="btn btn-primary btn-sm" onclick="downloadInvoicePdf('${iv.channel_id}')">📄 この請求書をPDFダウンロード</button>
+          </div>
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
             <div style="margin-left:32px;margin-top:14px">
               ${iv.channel_zip?`<div style="font-size:14px">〒${esc(iv.channel_zip)}</div>`:''}
