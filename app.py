@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from supabase import create_client
-import os, calendar, math, re
+import os, calendar, math, re, base64
 from datetime import date, timedelta, datetime, timezone
 from dotenv import load_dotenv
 
@@ -891,6 +891,152 @@ def invoice_pdf():
     from io import BytesIO
     return send_file(BytesIO(pdf), mimetype='application/pdf',
                      as_attachment=True, download_name=fname)
+
+# ─── 請求書メール送信（Resend・PDF添付）[フェーズ2] ──────
+# 送信に必要な環境変数（Renderで設定）:
+#   RESEND_API_KEY     … Resend の API キー
+#   INVOICE_FROM_EMAIL … 送信元アドレス（Resendで認証済みドメインのもの）
+RESEND_API_KEY     = os.environ.get('RESEND_API_KEY', '')
+INVOICE_FROM_EMAIL = os.environ.get('INVOICE_FROM_EMAIL', '')
+
+def _prev_month(d=None):
+    d = d or today_jst()
+    y, m = d.year, d.month
+    return f'{y-1:04d}-12' if m == 1 else f'{y:04d}-{m-1:02d}'
+
+def _invoice_email_html(iv, iss, month):
+    y, m = month.split('-')
+    issuer_name = (iss or {}).get('name') or 'みかわ 漬物部'
+    phone = f'<br>TEL: {iss.get("phone")}' if (iss or {}).get('phone') else ''
+    return (
+        '<div style="font-family:sans-serif;font-size:14px;color:#222;line-height:1.7">'
+        f'<p>{iv.get("channel_name","")} 御中</p>'
+        f'<p>いつもお世話になっております。{issuer_name}です。<br>'
+        f'{int(y)}年{int(m)}月分のご請求書を添付いたします。ご確認のほど、よろしくお願い申し上げます。</p>'
+        f'<p style="font-size:16px"><b>ご請求金額（税込）：{_yen(iv.get("total"))}</b></p>'
+        '<hr style="border:none;border-top:1px solid #ddd">'
+        f'<p style="font-size:12px;color:#666">{issuer_name}{phone}</p>'
+        '<p style="font-size:11px;color:#999">※本メールは送信専用です。ご不明な点はお取引ご担当者までお問い合わせください。</p>'
+        '</div>'
+    )
+
+def _send_email_resend(to, subject, html, pdf_bytes, pdf_name):
+    """Resend でPDF添付メールを送る。成功時 (True, message_id) / 失敗時 (False, error)。"""
+    if not RESEND_API_KEY or not INVOICE_FROM_EMAIL:
+        return False, 'RESEND_API_KEY / INVOICE_FROM_EMAIL が未設定です'
+    payload = {
+        'from': INVOICE_FROM_EMAIL,
+        'to': [to],
+        'subject': subject,
+        'html': html,
+        'attachments': [{
+            'filename': pdf_name,
+            'content': base64.b64encode(pdf_bytes).decode('ascii'),
+        }],
+    }
+    try:
+        import requests
+        r = requests.post('https://api.resend.com/emails',
+                          headers={'Authorization': f'Bearer {RESEND_API_KEY}',
+                                   'Content-Type': 'application/json'},
+                          json=payload, timeout=30)
+        if r.status_code >= 400:
+            return False, f'Resend {r.status_code}: {r.text[:200]}'
+        return True, (r.json() or {}).get('id', '')
+    except Exception as e:
+        return False, str(e)[:200]
+
+def _save_invoice_pdf(dept_code, month, channel_name, pdf_bytes):
+    """送信したPDFを Supabase Storage(bucket: invoices) に保存（ベストエフォート）。"""
+    safe = re.sub(r'[\\/:*?"<>|]', '_', channel_name or 'unknown')
+    path = f'{dept_code}/{month}/{safe}.pdf'
+    try:
+        sb.storage.from_('invoices').upload(
+            path, pdf_bytes,
+            {'content-type': 'application/pdf', 'upsert': 'true'})
+        return path
+    except Exception:
+        return None
+
+def _send_one_invoice(iv, iss, month, dept_code):
+    """1請求先へPDF添付メールを送る。結果 dict を返す（メール未登録はスキップ）。"""
+    name = iv.get('channel_name', '')
+    to = (iv.get('channel_email') or '').strip()
+    if not to:
+        return {'channel_id': iv.get('channel_id'), 'channel_name': name,
+                'status': 'skipped', 'reason': 'メール未登録'}
+    pdf = build_invoices_pdf([iv], iss, month)
+    _save_invoice_pdf(dept_code, month, name, pdf)
+    y, m = month.split('-')
+    issuer_name = (iss or {}).get('name') or 'みかわ 漬物部'
+    subject = f'【{issuer_name}】{int(y)}年{int(m)}月分 ご請求書'
+    fname = f'請求書_{name}_{month}.pdf'
+    ok, info = _send_email_resend(to, subject, _invoice_email_html(iv, iss, month), pdf, fname)
+    if ok:
+        return {'channel_id': iv.get('channel_id'), 'channel_name': name,
+                'email': to, 'status': 'sent', 'message_id': info}
+    return {'channel_id': iv.get('channel_id'), 'channel_name': name,
+            'email': to, 'status': 'failed', 'reason': info}
+
+def _summarize(results):
+    sent = [r for r in results if r['status'] == 'sent']
+    skipped = [r for r in results if r['status'] == 'skipped']
+    failed = [r for r in results if r['status'] == 'failed']
+    return {'ok': not failed, 'sent': sent, 'skipped': skipped, 'failed': failed,
+            'counts': {'sent': len(sent), 'skipped': len(skipped), 'failed': len(failed)}}
+
+@app.route('/api/invoices/send', methods=['POST'])
+def invoice_send():
+    """1請求先へ請求書PDFをメール送信する。body: {month, channel_id}"""
+    did = dept_id()
+    d = request.json or {}
+    month = d.get('month'); ch = d.get('channel_id')
+    if not month or not ch:
+        return jsonify({'ok': False, 'error': 'month と channel_id が必要です'}), 400
+    invoices = _compute_invoices(did, month, ch)
+    if not invoices:
+        return jsonify({'ok': False, 'error': '対象の請求データがありません'}), 404
+    dep = get_dept(); iss = (dep.get('config') or {}).get('issuer') or {}
+    res = _send_one_invoice(invoices[0], iss, month, dep.get('code', 'tsukemono'))
+    code = 200 if res['status'] != 'failed' else 502
+    return jsonify(_summarize([res])), code
+
+@app.route('/api/invoices/send-all', methods=['POST'])
+def invoice_send_all():
+    """当月(指定月)の全請求先へ一括メール送信する。body: {month}"""
+    did = dept_id()
+    d = request.json or {}
+    month = d.get('month')
+    if not month:
+        return jsonify({'ok': False, 'error': 'month が必要です'}), 400
+    invoices = _compute_invoices(did, month)
+    if not invoices:
+        return jsonify({'ok': False, 'error': '対象の請求データがありません'}), 404
+    dep = get_dept(); iss = (dep.get('config') or {}).get('issuer') or {}
+    code = dep.get('code', 'tsukemono')
+    results = [_send_one_invoice(iv, iss, month, code) for iv in invoices]
+    return jsonify(_summarize(results))
+
+@app.route('/api/admin/send-invoices', methods=['POST'])
+def invoice_send_month_cron():
+    """月初に前月分の請求書を自動メール送信する（cron用）。
+    対象は config.invoice_auto_email が真の部署。X-Cron-Secret で認証。"""
+    secret = os.environ.get('CRON_SECRET', '')
+    if secret and request.headers.get('X-Cron-Secret') != secret:
+        return jsonify({'error': 'unauthorized'}), 401
+    month = (request.json or {}).get('month') or _prev_month()
+    _refresh_departments()
+    depts = sb.table('hq_departments').select('*').eq('active', 1).execute().data or []
+    out = []
+    for dp in depts:
+        cfg = dp.get('config') or {}
+        if not cfg.get('invoice_auto_email'):
+            continue
+        iss = cfg.get('issuer') or {}
+        invoices = _compute_invoices(dp['id'], month)
+        results = [_send_one_invoice(iv, iss, month, dp.get('code', 'tsukemono')) for iv in invoices]
+        out.append({'dept': dp.get('code'), 'month': month, **_summarize(results)})
+    return jsonify({'ok': True, 'month': month, 'departments': out})
 
 # ─── 売上分析（納品予定日ベース・漬物部）──────
 @app.route('/api/shipment-analysis', methods=['GET'])

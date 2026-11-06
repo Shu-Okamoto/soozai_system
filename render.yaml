@@ -16,6 +16,13 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python finalize_pending.py
 
+  - type: cron
+    name: send-monthly-invoices
+    env: python
+    schedule: "0 0 1 * *"    # 毎月1日 09:00 JST = 00:00 UTC（前月分を自動送信）
+    buildCommand: pip install -r requirements.txt
+    startCommand: python send_invoices.py
+
 # PRごとにプレビュー環境を自動生成（Blueprint構成のPRプレビューはここで制御する）
 previews:
   generation: automatic
