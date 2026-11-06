@@ -2058,7 +2058,9 @@ async function updateExpense(date) {
 // ═══════════════════════════════════════════════
 // 週間献立
 // ═══════════════════════════════════════════════
-const MENU_CATS = ['メイン（煮物）','煮物①','酢もの①','サラダ①','天ぷら','デラックスメイン','メイン肉','魚','NPOメイン'];
+const MENU_CATS = ['メイン（煮物）','煮物①','酢もの①','サラダ①','デラックスメイン','メイン肉','魚','NPOメイン'];
+// 非表示にした固定行カテゴリ（データは残すが献立作成には表示しない。過去保存分も再表示しない）
+const HIDDEN_MENU_CATS = new Set(['天ぷら']);
 // getSubcats / getCatOrder / cachedCategories はinitData近辺で定義済み
 const MENU_CAT_TO_SUBCAT = {
   'メイン（煮物）':'煮物','煮物①':'煮物',
@@ -2071,7 +2073,7 @@ const MENU_CAT_TO_SUBCAT = {
 };
 const MENU_CAT_LABEL = { '魚':'メイン魚' };
 const REMOVABLE_FIXED_CATS = new Set(['デラックスメイン','メイン肉']);
-const MAIN_GROUP_CATS = new Set(['天ぷら','デラックスメイン','メイン肉','魚','NPOメイン']);
+const MAIN_GROUP_CATS = new Set(['デラックスメイン','メイン肉','魚','NPOメイン']);
 const MAIN_GROUP_BG = '#FFE8D6';
 const DOW_LABELS = ['月','火','水','木','金','土'];
 let extraMenuRowCount = 0;
@@ -2128,7 +2130,7 @@ async function renderMenuPage() {
 
   // 保存済みのおかず行を検出
   const savedExtras = [...new Set(
-    menus.filter(m=>!MENU_CATS.includes(m.category)).map(m=>m.category)
+    menus.filter(m=>!MENU_CATS.includes(m.category) && !HIDDEN_MENU_CATS.has(m.category)).map(m=>m.category)
   )].sort();
   extraMenuRowCount = savedExtras.reduce((max,cat)=>{
     const n = parseInt(cat.split('_')[1])||0; return Math.max(max,n);
