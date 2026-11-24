@@ -1039,7 +1039,6 @@ def invoice_send_month_cron():
     return jsonify({'ok': True, 'month': month, 'departments': out})
 
 # ─── 売上分析（納品予定日ベース・漬物部）──────
-@app.route('/api/shipment-analysis', methods=['GET'])
 def _shift_year(date_str, delta):
     """YYYY-MM-DD を delta 年ずらす。2/29 など存在しない日付は月末へ丸める。"""
     y, m, d = map(int, date_str[:10].split('-'))
@@ -1078,6 +1077,7 @@ def _agg_ships(did, start, end, prods, chans, want_lines=True):
     return {'lines':lines,'by_date':by_date,'by_ch':by_ch,'by_pr':by_pr,'by_dest':by_dest,
             'total_qty':total_qty,'total_amount':total_amount}
 
+@app.route('/api/shipment-analysis', methods=['GET'])
 def shipment_analysis():
     """出荷を納品予定日ベースで、日別明細＋取引先別／商品別／納品先別で集計。
     期間指定（start/end）と前年同期比（compare=1）に対応。month 指定は当月範囲へ変換。"""
