@@ -1040,19 +1040,17 @@ def invoice_send_month_cron():
 
 # ─── 売上分析（納品予定日ベース・漬物部）──────
 @app.route('/api/shipment-analysis', methods=['GET'])
-def shipment_analysis():
-    """月内の出荷を納品予定日ベースで、日別明細＋取引先別／商品別／納品先別で集計。"""
-    did = dept_id()
-    month = request.args.get('month')
-    if not month:
-        return jsonify({'ok': False, 'error': 'month が必要です'}), 400
-    y, m = map(int, month.split('-'))
+def _shift_year(date_str, delta):
+    """YYYY-MM-DD を delta 年ずらす。2/29 など存在しない日付は月末へ丸める。"""
+    y, m, d = map(int, date_str[:10].split('-'))
+    y += delta
     last = calendar.monthrange(y, m)[1]
-    start, end = f'{month}-01', f'{month}-{last:02d}'
+    return f'{y:04d}-{m:02d}-{min(d, last):02d}'
+
+def _agg_ships(did, start, end, prods, chans, want_lines=True):
+    """[start, end] の出荷を納品予定日ベースで集計して内部 dict を返す。"""
     ships = sb.table('hq_shipments').select('*').eq('department_id',did)\
         .gte('delivery_date',start).lte('delivery_date',end).order('delivery_date').order('id').execute().data
-    prods = {p['id']:p['name'] for p in sb.table('hq_products').select('id,name').eq('department_id',did).execute().data}
-    chans = {c['id']:c['name'] for c in sb.table('hq_channels').select('id,name').eq('department_id',did).execute().data}
     lines = []
     by_date, by_ch, by_pr, by_dest = {}, {}, {}, {}
     total_qty = total_amount = 0
@@ -1063,10 +1061,11 @@ def shipment_analysis():
         is_freight = s.get('item_type') == 'freight'
         pname = (s.get('item_name') or '送料') if is_freight else prods.get(pid,'')
         pkey  = 'freight' if is_freight else pid
-        lines.append({'id':s['id'],'order_date':s['order_date'],'delivery_date':s.get('delivery_date',''),
-                      'channel_id':cid,'channel_name':chans.get(cid,''),'dest_name':s.get('dest_name',''),
-                      'product_id':pid,'product_name':pname,'qty':qty,'unit_price':up,
-                      'amount':amt,'status':s['status']})
+        if want_lines:
+            lines.append({'id':s['id'],'order_date':s['order_date'],'delivery_date':s.get('delivery_date',''),
+                          'channel_id':cid,'channel_name':chans.get(cid,''),'dest_name':s.get('dest_name',''),
+                          'product_id':pid,'product_name':pname,'qty':qty,'unit_price':up,
+                          'amount':amt,'status':s['status']})
         total_qty += qty; total_amount += amt
         def acc(dct, key, name):
             e = dct.setdefault(key, {'name':name,'qty':0,'amount':0})
@@ -1076,12 +1075,60 @@ def shipment_analysis():
         acc(by_ch, cid, chans.get(cid,''))
         acc(by_pr, pkey, pname)
         acc(by_dest, dest, dest)
-    days   = [{'date':k, **v} for k,v in sorted(by_date.items())]
-    chs    = sorted([{'channel_id':k, **v} for k,v in by_ch.items()],   key=lambda x:-x['amount'])
-    prs    = sorted([{'product_id':k, **v} for k,v in by_pr.items()],   key=lambda x:-x['amount'])
-    dests  = sorted([{**v} for v in by_dest.values()],                  key=lambda x:-x['amount'])
-    return jsonify({'month':month,'total_qty':total_qty,'total_amount':total_amount,
-                    'lines':lines,'by_date':days,'by_channel':chs,'by_product':prs,'by_dest':dests})
+    return {'lines':lines,'by_date':by_date,'by_ch':by_ch,'by_pr':by_pr,'by_dest':by_dest,
+            'total_qty':total_qty,'total_amount':total_amount}
+
+def shipment_analysis():
+    """出荷を納品予定日ベースで、日別明細＋取引先別／商品別／納品先別で集計。
+    期間指定（start/end）と前年同期比（compare=1）に対応。month 指定は当月範囲へ変換。"""
+    did = dept_id()
+    start = request.args.get('start'); end = request.args.get('end')
+    month = request.args.get('month')
+    if not (start and end):
+        if month:
+            y, m = map(int, month.split('-'))
+            last = calendar.monthrange(y, m)[1]
+            start, end = f'{month}-01', f'{month}-{last:02d}'
+        else:
+            return jsonify({'ok': False, 'error': 'start/end もしくは month が必要です'}), 400
+    if start > end:
+        start, end = end, start
+    compare = request.args.get('compare') in ('1', 'true', 'yes')
+    prods = {p['id']:p['name'] for p in sb.table('hq_products').select('id,name').eq('department_id',did).execute().data}
+    chans = {c['id']:c['name'] for c in sb.table('hq_channels').select('id,name').eq('department_id',did).execute().data}
+    cur = _agg_ships(did, start, end, prods, chans, want_lines=True)
+    prev = None
+    if compare:
+        ps, pe = _shift_year(start, -1), _shift_year(end, -1)
+        pv = _agg_ships(did, ps, pe, prods, chans, want_lines=False)
+        prev = {'start':ps, 'end':pe, 'total_qty':pv['total_qty'], 'total_amount':pv['total_amount'],
+                'by_ch':{k:v['amount'] for k,v in pv['by_ch'].items()},
+                'by_pr':{k:v['amount'] for k,v in pv['by_pr'].items()},
+                'by_dest':{k:v['amount'] for k,v in pv['by_dest'].items()}}
+    def _mk(dct, idkey, prevmap):
+        out = []
+        for k, v in dct.items():
+            it = {idkey:k, **v}
+            if prev is not None:
+                it['prev_amount'] = prevmap.get(k, 0)
+            out.append(it)
+        out.sort(key=lambda x:-x['amount'])
+        return out
+    pch = prev['by_ch'] if prev else {}
+    ppr = prev['by_pr'] if prev else {}
+    pds = prev['by_dest'] if prev else {}
+    days   = [{'date':k, **v} for k,v in sorted(cur['by_date'].items())]
+    chs    = _mk(cur['by_ch'], 'channel_id', pch)
+    prs    = _mk(cur['by_pr'], 'product_id', ppr)
+    dests  = _mk(cur['by_dest'], 'dest_key', pds)
+    resp = {'start':start, 'end':end, 'month':month,
+            'total_qty':cur['total_qty'], 'total_amount':cur['total_amount'],
+            'lines':cur['lines'], 'by_date':days,
+            'by_channel':chs, 'by_product':prs, 'by_dest':dests, 'compare':compare}
+    if prev is not None:
+        resp['prev'] = {'start':prev['start'], 'end':prev['end'],
+                        'total_qty':prev['total_qty'], 'total_amount':prev['total_amount']}
+    return jsonify(resp)
 
 # ─── 製造数ベースの月次・年次サマリ（漬物部）──
 @app.route('/api/production-summary', methods=['GET'])
