@@ -4754,38 +4754,86 @@ function renderInvoiceList() {
 
 // ── 出荷ベースの売上分析（日別明細＋取引先別／商品別／納品先別）──
 let shipAnalysisView = 'date';
+let shipAnalysisStart = '';
+let shipAnalysisEnd = '';
+let shipAnalysisCompare = false;
+
+// 期間プリセット（今月／先月／今年／昨年）
+function _saPad(n){ return String(n).padStart(2,'0'); }
+function _saFirst(y,m){ return `${y}-${_saPad(m)}-01`; }
+function _saLast(y,m){ return `${y}-${_saPad(m)}-${new Date(y,m,0).getDate()}`; }
+function shipAnalysisPreset(kind){
+  const now = new Date();
+  let y = now.getFullYear(), m = now.getMonth()+1;
+  if (kind==='thismonth'){ shipAnalysisStart=_saFirst(y,m); shipAnalysisEnd=_saLast(y,m); }
+  else if (kind==='lastmonth'){ let ym=m-1, yy=y; if(ym===0){ym=12;yy--;} shipAnalysisStart=_saFirst(yy,ym); shipAnalysisEnd=_saLast(yy,ym); }
+  else if (kind==='thisyear'){ shipAnalysisStart=`${y}-01-01`; shipAnalysisEnd=`${y}-12-31`; }
+  else if (kind==='lastyear'){ shipAnalysisStart=`${y-1}-01-01`; shipAnalysisEnd=`${y-1}-12-31`; }
+  renderShipAnalysisPage();
+}
+// 前年比セル（prev が 0/未集計なら「新規」または「—」）
+function yoyCell(cur, prev){
+  if (prev==null || prev===0) return `<span style="color:var(--text3)">${cur>0?'新規':'—'}</span>`;
+  const r = Math.round((cur-prev)/prev*1000)/10;
+  const col = r>=0 ? '#2e7d32' : '#c62828';
+  return `<span style="color:${col}">${r>=0?'+':''}${r}%</span>`;
+}
+
 async function renderShipAnalysisPage() {
   setLoading();
-  const ym = currentDate.slice(0,7);
-  const data = await fetch(`${API}/shipment-analysis?month=${ym}`).then(r=>r.json()).catch(()=>null);
+  // 初期値：未設定なら表示中の月の初日〜末日
+  if (!shipAnalysisStart || !shipAnalysisEnd) {
+    const [y,m] = currentDate.slice(0,7).split('-').map(Number);
+    shipAnalysisStart = _saFirst(y,m); shipAnalysisEnd = _saLast(y,m);
+  }
+  const start = shipAnalysisStart, end = shipAnalysisEnd;
+  const cmp = shipAnalysisCompare;
+  const url = `${API}/shipment-analysis?start=${start}&end=${end}${cmp?'&compare=1':''}`;
+  const data = await fetch(url).then(r=>r.json()).catch(()=>null);
   window._shipAnalysis = data;
   const tabs = [['date','日別明細'],['channel','取引先別'],['product','商品別'],['dest','納品先別']]
     .map(([k,label])=>`<button onclick="shipAnalysisView='${k}';drawShipAnalysis()"
       class="btn btn-sm ${k===shipAnalysisView?'btn-primary':'btn-secondary'}" style="margin-right:6px">${label}</button>`).join('');
+  const prev = data?.prev;
+  const kpiCompare = (cmp && prev) ? `
+      <div class="kpi"><div class="kpi-label">前年同期 売上（${prev.start}〜${prev.end}）</div><div class="kpi-value">¥${fmt(prev.total_amount||0)}</div></div>
+      <div class="kpi"><div class="kpi-label">前年同期比（金額）</div><div class="kpi-value">${yoyCell(data.total_amount||0, prev.total_amount||0)}</div></div>` : '';
   document.getElementById('content').innerHTML = `
-    <div class="print-header"><h2>漬物部 売上分析</h2><p>${ym}</p></div>
-    <div class="no-print" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
-      <input type="month" value="${ym}" onchange="currentDate=this.value+'-01';document.getElementById('global-date').value=currentDate;renderShipAnalysisPage()" style="font-size:13px">
-      <span style="font-size:13px;color:var(--text2)">納品日（納品予定日）ベース・金額＝数量×単価（税抜）</span>
+    <div class="print-header"><h2>漬物部 売上分析</h2><p>${start} 〜 ${end}${cmp?'（前年同期比）':''}</p></div>
+    <div class="no-print" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <label style="font-size:13px;color:var(--text2)">期間</label>
+      <input type="date" value="${start}" onchange="shipAnalysisStart=this.value;renderShipAnalysisPage()" style="font-size:13px">
+      <span style="color:var(--text3)">〜</span>
+      <input type="date" value="${end}" onchange="shipAnalysisEnd=this.value;renderShipAnalysisPage()" style="font-size:13px">
+      <button class="btn btn-secondary btn-sm" onclick="shipAnalysisPreset('thismonth')">今月</button>
+      <button class="btn btn-secondary btn-sm" onclick="shipAnalysisPreset('lastmonth')">先月</button>
+      <button class="btn btn-secondary btn-sm" onclick="shipAnalysisPreset('thisyear')">今年</button>
+      <button class="btn btn-secondary btn-sm" onclick="shipAnalysisPreset('lastyear')">昨年</button>
+      <label style="font-size:13px;color:var(--text2);display:flex;align-items:center;gap:4px;margin-left:4px">
+        <input type="checkbox" ${cmp?'checked':''} onchange="shipAnalysisCompare=this.checked;renderShipAnalysisPage()">前年同期比
+      </label>
       <div style="margin-left:auto"><button class="btn btn-secondary btn-sm" onclick="window.print()">🖨 印刷</button></div>
     </div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">納品日（納品予定日）ベース・金額＝数量×単価（税抜）</div>
     <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
       <div class="kpi"><div class="kpi-label">売上金額計（税抜）</div><div class="kpi-value green">¥${fmt(data?.total_amount||0)}</div></div>
       <div class="kpi"><div class="kpi-label">売上数量計</div><div class="kpi-value">${fmt(data?.total_qty||0)}</div></div>
       <div class="kpi"><div class="kpi-label">明細件数</div><div class="kpi-value">${(data?.lines||[]).length}</div><div class="kpi-sub">件</div></div>
+      ${kpiCompare}
     </div>
     <div class="no-print" style="margin:12px 0">${tabs}</div>
     <div id="ship-analysis-body"></div>`;
   drawShipAnalysis();
 }
 
-function shipAnalysisRows(items, label, idKey) {
+function shipAnalysisRows(items, compare) {
   const total = items.reduce((a,b)=>a+b.amount,0) || 1;
   return items.map(it=>`
     <tr>
       <td style="text-align:left">${esc(it.name||'―')}</td>
       <td class="text-right">${fmt(it.qty)}</td>
       <td class="text-right">¥${fmt(it.amount)}</td>
+      ${compare?`<td class="text-right">¥${fmt(it.prev_amount||0)}</td><td class="text-right">${yoyCell(it.amount, it.prev_amount||0)}</td>`:''}
       <td class="text-right">${Math.round(it.amount/total*1000)/10}%</td>
     </tr>`).join('');
 }
@@ -4794,10 +4842,11 @@ function drawShipAnalysis() {
   const data = window._shipAnalysis;
   const body = document.getElementById('ship-analysis-body');
   if (!data || !(data.lines||[]).length) {
-    body.innerHTML = `<div class="text-muted text-center" style="padding:40px">この月（納品予定日）の売上はありません。</div>`;
+    body.innerHTML = `<div class="text-muted text-center" style="padding:40px">この期間（納品予定日）の売上はありません。</div>`;
     return;
   }
   const v = shipAnalysisView;
+  const cmp = !!data.compare;
   if (v === 'date') {
     const rows = data.lines.map(l=>`
       <tr>
@@ -4826,14 +4875,17 @@ function drawShipAnalysis() {
   }
   const map = {channel:['取引先','by_channel'],product:['商品','by_product'],dest:['納品先','by_dest']}[v];
   const items = data[map[1]] || [];
+  const prevTotal = data.prev ? (data.prev.total_amount||0) : 0;
+  const cmpHead = cmp ? `<th>前年</th><th>前年比</th>` : '';
+  const cmpFoot = cmp ? `<td class="text-right">¥${fmt(prevTotal)}</td><td class="text-right">${yoyCell(data.total_amount||0, prevTotal)}</td>` : '';
   body.innerHTML = `
-    <div class="card"><div class="card-header"><span class="card-title">${map[0]}別</span></div>
+    <div class="card"><div class="card-header"><span class="card-title">${map[0]}別${cmp?'（前年同期比）':''}</span></div>
     <div class="table-wrap"><table>
-      <thead><tr><th style="text-align:left;min-width:180px">${map[0]}</th><th>数量</th><th>金額</th><th>構成比</th></tr></thead>
-      <tbody>${shipAnalysisRows(items)}</tbody>
+      <thead><tr><th style="text-align:left;min-width:180px">${map[0]}</th><th>数量</th><th>金額</th>${cmpHead}<th>構成比</th></tr></thead>
+      <tbody>${shipAnalysisRows(items, cmp)}</tbody>
       <tfoot><tr class="fw-bold" style="background:var(--surface2)">
         <td class="left">合計</td><td class="text-right">${fmt(data.total_qty)}</td>
-        <td class="text-right">¥${fmt(data.total_amount)}</td><td class="text-right">100%</td>
+        <td class="text-right">¥${fmt(data.total_amount)}</td>${cmpFoot}<td class="text-right">100%</td>
       </tr></tfoot>
     </table></div></div>`;
 }
