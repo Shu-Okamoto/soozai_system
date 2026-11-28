@@ -769,6 +769,27 @@ def _ensure_pdf_font():
 def _yen(n):
     return f'¥{int(round(n or 0)):,}'
 
+def _fetch_logo(url, max_w, max_h):
+    """発行元ロゴURLから画像を取得し (bytes, 幅pt, 高さpt) を返す。
+    アスペクト比を保って max_w/max_h（pt）に収める。取得失敗やSVG等の
+    非対応画像は None を返す（ロゴ無しとして処理を続行）。"""
+    if not url:
+        return None
+    try:
+        import requests
+        from io import BytesIO
+        from reportlab.lib.utils import ImageReader
+        resp = requests.get(url, timeout=10)
+        if resp.status_code >= 400 or not resp.content:
+            return None
+        iw, ih = ImageReader(BytesIO(resp.content)).getSize()
+        if not iw or not ih:
+            return None
+        scale = min(max_w / iw, max_h / ih)
+        return (resp.content, iw * scale, ih * scale)
+    except Exception:
+        return None
+
 def build_invoices_pdf(invoices, iss, month):
     """請求書(1件以上)を1つのPDFにして bytes で返す。請求先ごとに改ページ。"""
     from io import BytesIO
@@ -776,7 +797,7 @@ def build_invoices_pdf(invoices, iss, month):
     from reportlab.lib.units import mm
     from reportlab.lib import colors
     from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle, Paragraph,
-                                    Spacer, PageBreak)
+                                    Spacer, PageBreak, Image as RLImage)
     from reportlab.lib.styles import ParagraphStyle
     _ensure_pdf_font()
     F = _PDF_FONT
@@ -795,6 +816,8 @@ def build_invoices_pdf(invoices, iss, month):
                             topMargin=15*mm, bottomMargin=15*mm, title='請求書')
     story = []
     issuer_name = (iss or {}).get('name') or 'みかわ 漬物部'
+    # 発行元ロゴ（画面表示と同様。最大 46mm×14mm に収める）。全ページ共通なので一度だけ取得。
+    logo = _fetch_logo((iss or {}).get('logo_url'), 46*mm, 14*mm)
     for idx, iv in enumerate(invoices):
         if idx:
             story.append(PageBreak())
@@ -812,11 +835,17 @@ def build_invoices_pdf(invoices, iss, month):
             (f'〒{iv.get("channel_zip")}' if iv.get('channel_zip') else ''),
             (iv.get('channel_address') or ''),
         ]))
+        right_cell = [Paragraph('請求書', title), Spacer(1,6), Paragraph(issuer_html, right)]
+        if logo:
+            content, lw, lh = logo
+            img = RLImage(BytesIO(content), width=lw, height=lh)
+            img.hAlign = 'RIGHT'
+            right_cell += [Spacer(1,6), img]
         header = Table([[
             [Paragraph(cust_html, small) if cust_html else Spacer(1,1),
              Spacer(1,8),
              Paragraph(f'{iv["channel_name"]} 御中', name_s)],
-            [Paragraph('請求書', title), Spacer(1,6), Paragraph(issuer_html, right)],
+            right_cell,
         ]], colWidths=[95*mm, 79*mm])
         header.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP')]))
         story.append(header)
